@@ -1,0 +1,19 @@
+# Build artifacts
+*.o
+*.a
+*.elf
+*.bin
+*.iso
+*.hdd
+head
+
+# Limine deploy tool build output
+limine-binary/limine-tool-*
+
+# Editor / tooling
+.cache
+compile_commands.json
+.clangd
+
+# OS-generated
+.DS_Store
