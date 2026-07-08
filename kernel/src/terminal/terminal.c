@@ -6,7 +6,7 @@ extern int scanline;
 extern uint64_t fb_size;
 extern char *fb;
 
-#define MAX_COLS (scanline / 4 / 8)
+#define MAX_COLS (scanline / ((psf_glyph_width() + 1) * 4))
 #define MAX_ROWS ((fb_size / scanline) / psf_glyph_height())
 
 static int cursor_x = 0;

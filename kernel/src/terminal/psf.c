@@ -124,3 +124,8 @@ int psf_glyph_height(void) {
     PSF_font *font = (PSF_font*)&_binary_font_psf_start;
     return font->height;
 }
+
+int psf_glyph_width(void) {
+    PSF_font *font = (PSF_font*)&_binary_font_psf_start;
+    return font->width;
+}

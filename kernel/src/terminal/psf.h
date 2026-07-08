@@ -33,3 +33,4 @@ typedef struct {
 void psf_init();
 void putchar(unsigned short int c, int cx, int cy, uint32_t fg, uint32_t bg);
 int psf_glyph_height(void);
+int psf_glyph_width(void);
