@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include "arch/gdt.h"
-#include "memory.h"
+#include <memory.h>
 
 // {base, limit, access, flags}
 // {0x00000000, 0x00000, 0x00, 0x0}  // null
@@ -29,10 +29,13 @@ static gdtr_t gdtr = {
 static tss_t tss;
 static uint8_t kernel_stack[KERNEL_STACK_SIZE];
 
+uint64_t *tss_rsp0_ptr;
+
 static void tss_init(void) {
     memset(&tss, 0, sizeof(tss));
     tss.rsp0       = (uint64_t)(kernel_stack + KERNEL_STACK_SIZE);
     tss.iomap_base = sizeof(tss_t);
+    tss_rsp0_ptr   = &tss.rsp0;   // <-- new line
 
     uint64_t base  = (uint64_t)&tss;
     uint64_t limit = sizeof(tss_t) - 1;

@@ -27,3 +27,5 @@ typedef struct __attribute__((packed)) {
 void gdt_load(gdtr_t *gdtr);
 void tss_load(void);
 void gdt_init(void);
+
+extern uint64_t *tss_rsp0_ptr;
