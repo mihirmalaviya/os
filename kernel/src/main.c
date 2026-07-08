@@ -10,7 +10,9 @@
 #include "mm/vmm.h"
 #include "mm/heap.h"
 #include "kernel.h"
-#include "tty.h"
+#include "tty/tty.h"
+#include "sched/task.h"
+#include "arch/isr.h"
 // #include "drivers/ata.h"
 // #include "fs/fat.h"
 // #include "memory.h"
@@ -18,6 +20,17 @@
 char *fb;
 int scanline;
 uint64_t fb_size;
+
+void task_b_fn(void) {
+		unlock_scheduler();
+    for (;;) {
+        kprintf("B");
+        sleep_ticks(1);
+        lock_scheduler();
+        schedule();
+        unlock_scheduler();
+    }
+}
 
 // Set the base revision to 6, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
@@ -71,7 +84,6 @@ void kmain(void) {
     gdt_init();
     idt_init();
     pic_init();
-    __asm__ volatile ("sti");
     pmm_init();
     vmm_init();
     heap_init();
@@ -87,6 +99,19 @@ void kmain(void) {
 		// kprintf("a: %d, b: %d, a_ptr: %x, b_ptr: %x\n", *a, *b, (uint64_t)a, (uint64_t)b);
 
     kprintf("hello kernel world!\n");
+
+    sched_init();
+    task_create(task_b_fn);
+
+    __asm__ volatile ("sti");
+
+    for (;;) {
+        kprintf("A");
+        // sleep_ticks(1);
+        lock_scheduler();
+        schedule();
+        unlock_scheduler();
+    }
 
     // uint16_t boot_sector[256];
     // ata_read_sectors(ATA_DRIVE_SLAVE, 0, 1, boot_sector);

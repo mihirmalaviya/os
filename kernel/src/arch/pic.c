@@ -66,7 +66,6 @@ static void pic_remap(int offset1, int offset2) {
     // outb(PIC2_DATA, 0);
 }
 
-
 #define PIC_READ_IRR                0x0a    /* OCW3 irq ready next CMD read */
 #define PIC_READ_ISR                0x0b    /* OCW3 irq service next CMD read */
 
@@ -134,7 +133,7 @@ void pic_init(void) {
     outb(PIC2_DATA, 0xFF);
 
 		// unmask
-    // IRQ_clear_mask(0); // timer
+    IRQ_clear_mask(0); // timer
     IRQ_clear_mask(1); // keyboard
 }
 

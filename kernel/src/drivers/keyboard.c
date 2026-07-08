@@ -1,6 +1,6 @@
 #include "drivers/keyboard.h"
 #include "arch/io.h"
-#include "tty.h"
+#include "tty/tty.h"
 #include <stdint.h>
 #include <stdbool.h>
 

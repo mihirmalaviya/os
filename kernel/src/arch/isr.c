@@ -2,6 +2,16 @@
 #include "arch/pic.h"
 #include "drivers/keyboard.h"
 #include "terminal/terminal.h"
+#include "sched/task.h"
+
+volatile uint64_t timer_ticks = 0;
+
+void sleep_ticks(uint64_t ticks) {
+    uint64_t target = timer_ticks + ticks;
+    while (timer_ticks < target) {
+        asm volatile ("hlt");
+    }
+}
 
 void isr_handler(interrupt_frame_t *frame) {
 		// vector is the number in the IDT table
@@ -26,7 +36,8 @@ void isr_handler(interrupt_frame_t *frame) {
             for (;;) asm ("hlt");
 
         case 32:
-            // kprintf("timer tick\n");
+            timer_ticks++;
+						current_tcb->ticks_used++;
             PIC_sendEOI(frame->vector - 32);
             break;
         case 33:
