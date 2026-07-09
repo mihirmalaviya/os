@@ -66,8 +66,8 @@ static void pic_remap(int offset1, int offset2) {
     // outb(PIC2_DATA, 0);
 }
 
-#define PIC_READ_IRR                0x0a    /* OCW3 irq ready next CMD read */
-#define PIC_READ_ISR                0x0b    /* OCW3 irq service next CMD read */
+#define PIC_READ_IRR 0x0a    /* OCW3 irq ready next CMD read */
+#define PIC_READ_ISR 0x0b    /* OCW3 irq service next CMD read */
 
 /* Helper func */
 static uint16_t __pic_get_irq_reg(int ocw3)
@@ -121,7 +121,6 @@ void IRQ_clear_mask(uint8_t IRQline) {
 
 /*
 
-	
 
 
 */
