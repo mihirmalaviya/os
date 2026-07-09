@@ -6,6 +6,7 @@
 #include "arch/gdt.h"
 #include "arch/idt.h"
 #include "arch/pic.h"
+#include "arch/pit.h"
 #include "mm/pmm.h"
 #include "mm/vmm.h"
 #include "mm/heap.h"
@@ -21,14 +22,12 @@ char *fb;
 int scanline;
 uint64_t fb_size;
 
+volatile uint64_t b_counter = 0;
+
 void task_b_fn(void) {
 		unlock_scheduler();
     for (;;) {
-        kprintf("B");
-        sleep_ticks(1);
-        lock_scheduler();
-        schedule();
-        unlock_scheduler();
+        b_counter++;
     }
 }
 
@@ -84,6 +83,7 @@ void kmain(void) {
     gdt_init();
     idt_init();
     pic_init();
+    pit_init();
     pmm_init();
     vmm_init();
     heap_init();
@@ -106,11 +106,8 @@ void kmain(void) {
     __asm__ volatile ("sti");
 
     for (;;) {
-        kprintf("A");
-        // sleep_ticks(1);
-        lock_scheduler();
-        schedule();
-        unlock_scheduler();
+        kprintf("a %d\n", (int)b_counter);
+        ms_sleep(300);
     }
 
     // uint16_t boot_sector[256];

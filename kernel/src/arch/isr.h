@@ -9,6 +9,3 @@ typedef struct __attribute__((packed)) {
 } interrupt_frame_t;
 
 void isr_handler(interrupt_frame_t *frame);
-
-extern volatile uint64_t timer_ticks;
-void sleep_ticks(uint64_t ticks);

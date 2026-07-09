@@ -4,7 +4,10 @@
 typedef enum {
     TCB_READY,
     TCB_RUNNING,
+    TCB_SLEEPING,
     TCB_BLOCKED,
+    TCB_PAUSED,
+    TCB_WAITING_FOR_LOCK,
     TCB_TERMINATED,
 } tcb_state_t;
 
@@ -17,9 +20,19 @@ typedef struct thread_control_block {
     struct thread_control_block *next;
     tcb_state_t state;
 		uint64_t ticks_used;
+		uint64_t sleep_expiry;
+		uint64_t time_slice_length; // ns of CPU time this task gets before forced preemption
+		int irq_disable_counter; // nesting depth of this task's own lock_scheduler()/lock_stuff() calls
 } thread_control_block_t;
 
 extern thread_control_block_t *current_tcb;
+
+typedef struct {
+    int max_count;
+    int current_count;
+    thread_control_block_t *first_waiting_task;
+    thread_control_block_t *last_waiting_task;
+} SEMAPHORE;
 
 void sched_init(void);
 thread_control_block_t *task_create(void (*entry)(void));
@@ -38,3 +51,19 @@ void unlock_stuff(void);
 
 void block_task(int reason);
 void unblock_task(thread_control_block_t *task);
+
+void PIT_IRQ_handler(void);
+void check_postponed_switch(void);
+
+void nano_sleep_until(uint64_t when);
+void nano_sleep(uint64_t nanoseconds);
+void ms_sleep(uint64_t milliseconds);
+
+void terminate_task(void);
+
+SEMAPHORE *create_semaphore(int max_count);
+SEMAPHORE *create_mutex(void);
+void acquire_semaphore(SEMAPHORE *semaphore);
+void acquire_mutex(SEMAPHORE *semaphore);
+void release_semaphore(SEMAPHORE *semaphore);
+void release_mutex(SEMAPHORE *semaphore);

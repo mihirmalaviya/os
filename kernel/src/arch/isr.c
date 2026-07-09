@@ -1,17 +1,9 @@
 #include "arch/isr.h"
 #include "arch/pic.h"
+#include "arch/pit.h"
 #include "drivers/keyboard.h"
 #include "terminal/terminal.h"
 #include "sched/task.h"
-
-volatile uint64_t timer_ticks = 0;
-
-void sleep_ticks(uint64_t ticks) {
-    uint64_t target = timer_ticks + ticks;
-    while (timer_ticks < target) {
-        asm volatile ("hlt");
-    }
-}
 
 void isr_handler(interrupt_frame_t *frame) {
 		// vector is the number in the IDT table
@@ -36,9 +28,11 @@ void isr_handler(interrupt_frame_t *frame) {
             for (;;) asm ("hlt");
 
         case 32:
-            timer_ticks++;
-						current_tcb->ticks_used++;
+            // EOI first: PIT_IRQ_handler() never switches tasks itself (it only
+            // sets postpone_task_switches_counter/task_switches_postponed_flag),
+            // but ack the PIC before it runs anyway, on general principle.
             PIC_sendEOI(frame->vector - 32);
+            PIT_IRQ_handler();
             break;
         case 33:
             keyboard_handle_irq();
@@ -47,4 +41,6 @@ void isr_handler(interrupt_frame_t *frame) {
         default:
             break;
     }
+
+    check_postponed_switch();
 }
