@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
-#include <memory.h>
+#include <string.h>
 
 // GCC and Clang reserve the right to generate calls to the following
 // 4 functions even if they are not directly called.
@@ -56,4 +56,34 @@ int memcmp(const void *s1, const void *s2, size_t n) {
     }
 
     return 0;
+}
+
+void strcpy(char dest[], const char source[]) {
+    int i = 0;
+    while (1) {
+        dest[i] = source[i];
+        if (dest[i] == '\0') {
+            break;
+        }
+        i++;
+    }
+}
+
+int strcmp(const char s1[], const char s2[]) {
+    int i = 0;
+    while (s1[i] != '\0' && s1[i] == s2[i]) {
+        i++;
+    }
+    return (uint8_t)s1[i] - (uint8_t)s2[i];
+}
+
+int strncmp(const char s1[], const char s2[], size_t n) {
+    size_t i = 0;
+    while (i < n && s1[i] != '\0' && s1[i] == s2[i]) {
+        i++;
+    }
+    if (i == n) {
+        return 0;
+    }
+    return (uint8_t)s1[i] - (uint8_t)s2[i];
 }
