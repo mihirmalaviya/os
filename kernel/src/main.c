@@ -14,6 +14,7 @@
 #include "tty/tty.h"
 #include "sched/task.h"
 #include "arch/isr.h"
+#include "fs/vfs.h"
 // #include "drivers/ata.h"
 // #include "fs/fat.h"
 // #include "memory.h"
@@ -87,6 +88,7 @@ void kmain(void) {
     pmm_init();
     vmm_init();
     heap_init();
+    vfs_init();
 
     // uint64_t *heap_test = (uint64_t *)0x444444440000ULL;
     // *heap_test = 42;
