@@ -1,6 +1,7 @@
 #include "terminal.h"
-#include "memory.h"
+#include "string.h"
 #include <stdarg.h>
+#include <nanoprintf.h>
 
 extern int scanline;
 extern uint64_t fb_size;
@@ -46,68 +47,36 @@ void kputchar(char c) {
     print_char(c);
 }
 
+void kbackspace(void) {
+    if (cursor_x == 0) return; // not walking back across lines, keep it simple
+    cursor_x--;
+    putchar((unsigned short int)' ', cursor_x, cursor_y, 0xFFFFFF, 0x000000);
+}
+
 void terminal_clear(void) {
     memset(fb, 0, fb_size);
     cursor_x = 0;
     cursor_y = 0;
 }
 
-static void print_str(const char *s) {
-    while (*s != '\0') {
-        print_char(*s);
-        s++;
-    }
-}
-
-static void print_hex(uint64_t n) {
-    const char *digits = "0123456789abcdef";
-    char buf[16];
-    int i = 0;
-    if (n == 0) { print_char('0'); return; }
-    while (n > 0) {
-        buf[i++] = digits[n & 0xf];
-        n >>= 4;
-    }
-    for (int j = i - 1; j >= 0; j--)
-        print_char(buf[j]);
-}
-
-static void print_int(int n) {
-    if (n < 0) {
-        print_char('-');
-        n = -n;
-    }
-    if (n == 0) {
-        print_char('0');
-        return;
-    }
-    char buf[20];
-    int i = 0;
-    while (n > 0) {
-        buf[i++] = '0' + (n % 10);
-        n /= 10;
-    }
-    for (int j = i - 1; j >= 0; j--) {
-        print_char(buf[j]);
-    }
-}
+#define KPRINTF_BUF_SIZE 1024
 
 void kprintf(const char *fmt, ...) {
+    char buf[KPRINTF_BUF_SIZE];
     va_list args;
+
     va_start(args, fmt);
-    while (*fmt != '\0') {
-        if (*fmt != '%') {
-            print_char(*fmt);
-        } else {
-            fmt++;
-            switch (*fmt) {
-                case 's': print_str(va_arg(args, char *));      break;
-                case 'd': print_int(va_arg(args, int));         break;
-                case 'x': print_hex(va_arg(args, uint64_t));    break;
-                case '%': print_char('%');                      break;
-            }
-        }
-        fmt++;
-    }
+    int len = npf_vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
+
+    if (len < 0) {
+        return;
+    }
+    if (len >= (int)sizeof(buf)) {
+        len = sizeof(buf) - 1; // npf_vsnprintf already truncated + null-terminated buf for us
+    }
+
+    for (int i = 0; i < len; i++) {
+        print_char(buf[i]);
+    }
 }

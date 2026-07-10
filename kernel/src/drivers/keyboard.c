@@ -13,7 +13,7 @@ static bool ctrl_held = false;
 static const key_code_t scancode_to_keycode[] = {
     KEY_UNKNOWN, KEY_ESCAPE,
     KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0,
-    KEY_MINUS, KEY_EQUAL, KEY_UNKNOWN, KEY_TAB,
+    KEY_MINUS, KEY_EQUAL, KEY_BACKSPACE, KEY_TAB,
     KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I, KEY_O, KEY_P,
     KEY_LBRACKET, KEY_RBRACKET, KEY_RETURN, KEY_LCTRL,
     KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L,
@@ -86,7 +86,7 @@ void keyboard_handle_irq(void) {
     if (released) return;
 
     if (ctrl_held && key == KEY_L) {
-        tty_clear();
+        tty_enqueue(0x0C); // ASCII form feed, traditional ^L clear-screen
         return;
     }
 
