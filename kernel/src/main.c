@@ -13,11 +13,11 @@
 #include "kernel.h"
 #include "tty/tty.h"
 #include "sched/task.h"
-#include "arch/isr.h"
+// #include "arch/isr.h"
 #include "fs/vfs.h"
-// #include "drivers/ata.h"
+#include "fs/tar.h"
+#include "drivers/ata.h"
 // #include "fs/fat.h"
-// #include "memory.h"
 
 char *fb;
 int scanline;
@@ -107,24 +107,33 @@ void kmain(void) {
 
     __asm__ volatile ("sti");
 
-    for (;;) {
-        kprintf("a %d\n", (int)b_counter);
-        ms_sleep(300);
-    }
-
-    // uint16_t boot_sector[256];
-    // ata_read_sectors(ATA_DRIVE_SLAVE, 0, 1, boot_sector);
-		// kprintf("%x\n", (uint64_t)boot_sector[255]);
-    // for (int i = 0; i < 256; i++) {
-    //     kprintf("%x ", (uint64_t)boot_sector[i]);
-    //     if ((i + 1) % 8 == 0) kprintf("\n");
+    // for (;;) {
+    //     kprintf("a %d\n", (int)b_counter);
+    //     ms_sleep(300);
     // }
+
+		//   uint16_t boot_sector[256];
+		//   ata_read_sectors(ATA_DRIVE_SLAVE, 0, 1, boot_sector);
+		// kprintf("%x\n", boot_sector[255]);
+		//   for (int i = 0; i < 256; i++) {
+		//       kprintf("%x ", (uint64_t)boot_sector[i]);
+		//       if ((i + 1) % 8 == 0) kprintf("\n");
+		//   }
 
     // fat_init(ATA_DRIVE_SLAVE);
     // fat_read_root_dir();
 
-    tty_init();
+    // int tar_fd = tar_open("testfile.txt", 0);
+    // kprintf("tar_open(\"testfile.txt\") = %d\n", tar_fd);
+    //
+    // if (tar_fd >= 0) {
+    //     char read_buf[64];
+    //     int64_t n = tar_read(tar_fd, read_buf, sizeof(read_buf) - 1);
+    //     read_buf[n] = '\0';
+    //     kprintf("tar_read returned %d bytes: \"%s\"\n", (int)n, read_buf);
+    // }
 
+    tty_init();
     for (;;) {
         tty_poll();
         asm ("hlt");

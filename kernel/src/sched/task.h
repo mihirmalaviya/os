@@ -19,6 +19,7 @@ typedef struct thread_control_block {
     uint64_t cr3;      // this task's address space
     struct thread_control_block *next;
     tcb_state_t state;
+		uint64_t task_id; // unique, never reused (unlike the tcb's own address)
 		uint64_t ticks_used;
 		uint64_t sleep_expiry;
 		uint64_t time_slice_length; // ns of CPU time this task gets before forced preemption
@@ -60,6 +61,7 @@ void nano_sleep(uint64_t nanoseconds);
 void ms_sleep(uint64_t milliseconds);
 
 void terminate_task(void);
+void print_tasks(void);
 
 SEMAPHORE *create_semaphore(int max_count);
 SEMAPHORE *create_mutex(void);

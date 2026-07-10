@@ -3,6 +3,7 @@
 #include "mm/vmm.h"
 #include "arch/gdt.h"
 #include "arch/pit.h"
+#include "terminal/terminal.h"
 
 thread_control_block_t *current_tcb;
 thread_control_block_t *idle_task;
@@ -69,6 +70,34 @@ thread_control_block_t *first_sleeping_task;
 
 thread_control_block_t *first_terminated_task;
 
+static uint64_t next_task_id = 0;
+
+static const char *tcb_state_name(tcb_state_t state) {
+    switch (state) {
+        case TCB_READY:            return "ready";
+        case TCB_RUNNING:          return "running";
+        case TCB_SLEEPING:         return "sleeping";
+        case TCB_BLOCKED:          return "blocked";
+        case TCB_PAUSED:           return "paused";
+        case TCB_WAITING_FOR_LOCK: return "waiting_for_lock";
+        case TCB_TERMINATED:       return "terminated";
+        default:                   return "unknown";
+    }
+}
+
+static void print_task_list(thread_control_block_t *head) {
+    for (thread_control_block_t *task = head; task != NULL; task = task->next) {
+        kprintf("  task %d: ticks_used=%d %s\n", (int)task->task_id, (int)task->ticks_used, tcb_state_name(task->state));
+    }
+}
+
+void print_tasks(void) {
+    // kprintf("task %d: %s (current)\n", (int)current_tcb->task_id, tcb_state_name(current_tcb->state));
+    print_task_list(first_ready_task);
+    print_task_list(first_sleeping_task);
+    print_task_list(first_terminated_task);
+}
+
 thread_control_block_t *task_create(void (*entry)(void)) {
     thread_control_block_t *tcb = kmalloc(sizeof(thread_control_block_t)); // pointer to tcb in heap
     uint8_t *stack = kmalloc(TASK_STACK_SIZE); // pointer to stack in heap
@@ -88,6 +117,7 @@ thread_control_block_t *task_create(void (*entry)(void)) {
     tcb->state = TCB_READY;
     tcb->time_slice_length = TIME_SLICE_LENGTH;
     tcb->irq_disable_counter = 1;
+    tcb->task_id = next_task_id++;
 		// tcb->next = current_tcb->next;
 		// current_tcb->next = tcb;
 
@@ -397,8 +427,10 @@ void sched_init(void) {
     boot->state = TCB_RUNNING;
     boot->time_slice_length = TIME_SLICE_LENGTH;
     boot->irq_disable_counter = 0;
+    boot->task_id = next_task_id++;
     boot->next  = boot;
     current_tcb = boot;
+    time_slice_remaining = boot->time_slice_length;
 		idle_task = task_create(kernel_idle_task);
 		cleaner_task_tcb = task_create(cleaner_task);
 }
