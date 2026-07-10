@@ -1,7 +1,7 @@
 #pragma once
 #import	<stdint.h>
 #define VFS_TYPE_LENGTH 32
-#define VFS_PATH_LENGTH 64
+#define VFS_PATH_LENGTH 256 // must cover the largest path any backing fs can produce (ustar: 100 name + 155 prefix)
 
 // one entry as returned by readdir
 typedef struct {

@@ -2,7 +2,7 @@
 #include "fs/tar.h"
 #include "fs/proc.h"
 #include "mm/heap.h"
-#include <memory.h>
+#include <string.h>
 
 mountpoint_t *mountpoints_root;
 
