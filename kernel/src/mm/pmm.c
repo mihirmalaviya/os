@@ -2,7 +2,7 @@
 #include <stddef.h>
 #include <limine.h>
 #include "mm/pmm.h"
-#include "memory.h"
+#include "string.h"
 #include "terminal/terminal.h"
 #include "kernel.h"
 

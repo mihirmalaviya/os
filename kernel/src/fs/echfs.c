@@ -1,7 +1,7 @@
 #include "fs/echfs.h"
 #include "drivers/ata.h"
 #include "kernel.h"
-#include <memory.h>
+#include <string.h>
 
 #define ECHFS_SIGNATURE "_ECH_FS_"
 #define ECHFS_ALLOC_TABLE_START 16

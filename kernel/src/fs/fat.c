@@ -3,7 +3,7 @@
 #include "kernel.h"
 #include "terminal/terminal.h"
 #include "mm/heap.h"
-#include <memory.h>
+#include <string.h>
 
 #define FAT_ATTR_DIRECTORY 0x10
 #define FAT_ATTR_LFN       0x0F
@@ -126,7 +126,7 @@ uint8_t *fat_read_file(uint16_t first_cluster, uint32_t file_size) {
     while (cluster < 0xFFF8) {
         uint32_t sector = (cluster - 2) * fs.sectors_per_cluster + fs.first_data_sector;
 
-        ata_read_sectors(fs.drive, sector, fs.sectors_per_cluster, (uint16_t *)(buffer + offset));
+        ata_read_sectors(fs.drive, sector, fs.sectors_per_cluster, buffer + offset);
 
         offset += cluster_size;
         cluster = fat_next_cluster(cluster);
@@ -140,7 +140,7 @@ int fat_find_file(const char *name, uint16_t *cluster, uint32_t *file_size) {
     uint32_t size = fs.root_dir_sectors * fs.bytes_per_sector;
     uint8_t *buffer = (uint8_t *)kmalloc(size);
 
-    ata_read_sectors(fs.drive, fs.first_root_dir_sector, fs.root_dir_sectors, (uint16_t *)buffer);
+    ata_read_sectors(fs.drive, fs.first_root_dir_sector, fs.root_dir_sectors, buffer);
 
     fat16_dirent_t *entries = (fat16_dirent_t *)buffer;
     uint32_t entry_count = size / 32;
@@ -166,7 +166,7 @@ void fat_read_root_dir(void) {
     uint32_t size = fs.root_dir_sectors * fs.bytes_per_sector;
     uint8_t *buffer = (uint8_t *)kmalloc(size);
 
-    ata_read_sectors(fs.drive, fs.first_root_dir_sector, fs.root_dir_sectors, (uint16_t *)buffer);
+    ata_read_sectors(fs.drive, fs.first_root_dir_sector, fs.root_dir_sectors, buffer);
 
     fat16_dirent_t *entries = (fat16_dirent_t *)buffer;
     uint32_t entry_count = size / 32;

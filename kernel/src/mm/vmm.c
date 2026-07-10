@@ -1,6 +1,6 @@
 #include "mm/vmm.h"
 #include "mm/pmm.h"
-#include "memory.h"
+#include "string.h"
 #include "terminal/terminal.h"
 #include "kernel.h"
 #include <stdint.h>
@@ -50,7 +50,7 @@ void vmm_map(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) {
 
 		// this should never happen if the code is working correctly
     if (pt[pt_i] & VMM_PRESENT) {
-        kprintf("vmm: remapping already-present page at %x\n", virt);
+        kprintf("vmm: remapping already-present page at %llx\n", virt);
         hcf();
     }
 

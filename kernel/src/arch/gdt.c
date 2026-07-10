@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include "arch/gdt.h"
-#include <memory.h>
+#include <string.h>
 
 // {base, limit, access, flags}
 // {0x00000000, 0x00000, 0x00, 0x0}  // null

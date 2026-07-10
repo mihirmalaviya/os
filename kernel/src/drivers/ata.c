@@ -50,7 +50,9 @@ static void ata_read_sectors_chunk(uint8_t drive, uint32_t lba, uint8_t count, u
     }
 }
 
-void ata_read_sectors(uint8_t drive, uint32_t lba, uint32_t count, uint16_t *buffer) {
+void ata_read_sectors(uint8_t drive, uint32_t lba, uint32_t count, void *buf) {
+    uint16_t *buffer = (uint16_t *)buf;
+
     while (count > 0) {
         uint8_t chunk = (count > 255) ? 255 : (uint8_t)count;
 
