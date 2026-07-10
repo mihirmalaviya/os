@@ -17,3 +17,9 @@ compile_commands.json
 
 # OS-generated
 .DS_Store
+
+# Not wired up yet
+kernel/src/fs/fat.c
+kernel/src/fs/fat.h
+kernel/src/fs/echfs.c
+kernel/src/fs/echfs.h
