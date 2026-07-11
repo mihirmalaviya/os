@@ -31,6 +31,8 @@ run: $(IMAGE_NAME).iso
 		-M pc \
 		-hda $(IMAGE_NAME).hdd \
 		-hdb data.hdd \
+		-netdev user,id=net0 \
+		-device rtl8139,netdev=net0 \
 		$(QEMUFLAGS)
 
 .PHONY: run-uefi

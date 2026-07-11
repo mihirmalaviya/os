@@ -17,6 +17,7 @@
 #include "fs/vfs.h"
 #include "fs/tar.h"
 #include "drivers/ata.h"
+#include "drivers/pci.h"
 // #include "fs/fat.h"
 
 char *fb;
@@ -90,6 +91,16 @@ void kmain(void) {
     heap_init();
     vfs_init();
 
+    kprintf("hello kernel world!\n");
+
+    pci_scan();
+    // pci_print_devices();
+
+    sched_init();
+    task_create(task_b_fn);
+
+    __asm__ volatile ("sti");
+
     // uint64_t *heap_test = (uint64_t *)0x444444440000ULL;
     // *heap_test = 42;
     // kprintf("heap test: %d\n", (int)*heap_test);
@@ -99,13 +110,6 @@ void kmain(void) {
     // int *b = (int *)kmalloc(sizeof(int));
     // *b = 20;
     // kprintf("a: %d, b: %d, a_ptr: %x, b_ptr: %x\n", *a, *b, (uint64_t)a, (uint64_t)b);
-
-    kprintf("hello kernel world!\n");
-
-    sched_init();
-    task_create(task_b_fn);
-
-    __asm__ volatile ("sti");
 
     // for (;;) {
     //     kprintf("a %d\n", (int)b_counter);

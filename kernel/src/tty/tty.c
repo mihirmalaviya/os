@@ -2,6 +2,7 @@
 #include "sched/task.h"
 #include "terminal/terminal.h"
 #include "fs/vfs.h"
+#include "drivers/pci.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -100,6 +101,8 @@ static void tty_execute_command(const char *cmd) {
         tty_ls("");
     } else if (strncmp(cmd, "ls ", 3) == 0) {
         tty_ls(cmd + 3);
+    } else if (strcmp(cmd, "lspci") == 0) {
+        pci_print_devices();
     } else {
         // kprintf("unknown command: %s\n", cmd);
     }

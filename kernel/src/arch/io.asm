@@ -4,6 +4,8 @@ global inb
 global outb
 global inw
 global outw
+global inl
+global outl
 
 inb:
     mov dx, di
@@ -25,4 +27,15 @@ outw:
     mov dx, di
     mov ax, si
     out dx, ax
+    ret
+
+inl:
+    mov dx, di
+    in eax, dx
+    ret
+
+outl:
+    mov dx, di
+    mov eax, esi
+    out dx, eax
     ret
