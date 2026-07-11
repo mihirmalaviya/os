@@ -26,10 +26,10 @@
 
 void PIC_sendEOI(uint8_t irq)
 {
-	if(irq >= 8)
-		outb(PIC2_COMMAND,PIC_EOI);
-	
-	outb(PIC1_COMMAND,PIC_EOI);
+    if(irq >= 8)
+        outb(PIC2_COMMAND,PIC_EOI);
+
+    outb(PIC1_COMMAND,PIC_EOI);
 }
 
 static void io_wait(void) {
@@ -37,11 +37,11 @@ static void io_wait(void) {
 }
 
 /*
-arguments:
-    offset1 - vector offset for master PIC
-        vectors on the master become offset1..offset1+7
-    offset2 - same for slave PIC: offset2..offset2+7
-*/
+   arguments:
+   offset1 - vector offset for master PIC
+   vectors on the master become offset1..offset1+7
+   offset2 - same for slave PIC: offset2..offset2+7
+   */
 static void pic_remap(int offset1, int offset2) {
     outb(PIC1_COMMAND, ICW1_INIT | ICW1_ICW4); // starts the initialization sequence (in cascade mode)
     io_wait();
@@ -131,7 +131,7 @@ void pic_init(void) {
     outb(PIC1_DATA, 0xFF);
     outb(PIC2_DATA, 0xFF);
 
-		// unmask
+    // unmask
     IRQ_clear_mask(0); // timer
     IRQ_clear_mask(1); // keyboard
 }

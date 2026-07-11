@@ -48,13 +48,13 @@ void vmm_map(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) {
     uint64_t *pd   = get_or_create(pdpt, pdpt_i);
     uint64_t *pt   = get_or_create(pd,   pd_i);
 
-		// this should never happen if the code is working correctly
+    // this should never happen if the code is working correctly
     if (pt[pt_i] & VMM_PRESENT) {
         kprintf("vmm: remapping already-present page at %llx\n", virt);
         hcf();
     }
 
-		// kprintf("heres whats in this pt entry: %x\n", pt[pt_i]);
+    // kprintf("heres whats in this pt entry: %x\n", pt[pt_i]);
 
     pt[pt_i] = phys | flags;
 }
@@ -69,10 +69,10 @@ void vmm_unmap(uint64_t *pml4, uint64_t virt) {
     uint64_t *pd   = get_or_create(pdpt, pdpt_i);
     uint64_t *pt   = get_or_create(pd,   pd_i);
 
-		uint64_t phys = pt[pt_i];
+    uint64_t phys = pt[pt_i];
     pt[pt_i] &= ~VMM_PRESENT;
     invlpg(virt);
-		pmm_free(phys);
+    pmm_free(phys);
 }
 
 void vmm_switch(uint64_t *pml4) {
@@ -83,12 +83,12 @@ void vmm_switch(uint64_t *pml4) {
 
 void vmm_init(void) {
 
-		if (kaddr_req.response == NULL) {
-				panic("vmm: kaddr request failed");
-		}
+    if (kaddr_req.response == NULL) {
+        panic("vmm: kaddr request failed");
+    }
 
-		// read the current page table
-		current_pml4 = vmm_get_current_pml4();
+    // read the current page table
+    current_pml4 = vmm_get_current_pml4();
     // current_pml4 = vmm_new_pagemap();
 
     // // map all physical memory at the HHDM offset

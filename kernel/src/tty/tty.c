@@ -92,8 +92,8 @@ static void tty_ls(const char *arg) {
 static void tty_execute_command(const char *cmd) {
     if (strcmp(cmd, "clear") == 0) {
         tty_clear();
-		} else if (strcmp(cmd, "tasks") == 0) {
-       	print_tasks();
+    } else if (strcmp(cmd, "tasks") == 0) {
+        print_tasks();
     } else if (strncmp(cmd, "cat ", 4) == 0) {
         tty_cat(cmd + 4);
     } else if (strcmp(cmd, "ls") == 0) {

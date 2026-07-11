@@ -17,23 +17,23 @@ void heap_init(void) {
 void *kmalloc(size_t size) {
     size = (size + 15) & ~15ULL; // round up to 16 bytes
 
-		if (heap_cursor+size > HEAP_START+HEAP_SIZE) {
-				panic("kmalloc: heap exhausted");
-				return NULL;
-		}
+    if (heap_cursor+size > HEAP_START+HEAP_SIZE) {
+        panic("kmalloc: heap exhausted");
+        return NULL;
+    }
 
-		uint64_t end = heap_cursor + size;
-		while (heap_mapped_until < end) {
-				uint64_t phys = pmm_alloc();
-				vmm_map(vmm_get_current_pml4(), heap_mapped_until, phys, VMM_PRESENT | VMM_WRITABLE);
-				heap_mapped_until += PAGE_SIZE;
-		}
+    uint64_t end = heap_cursor + size;
+    while (heap_mapped_until < end) {
+        uint64_t phys = pmm_alloc();
+        vmm_map(vmm_get_current_pml4(), heap_mapped_until, phys, VMM_PRESENT | VMM_WRITABLE);
+        heap_mapped_until += PAGE_SIZE;
+    }
 
-		void *ptr = (void *)heap_cursor;
-		heap_cursor += size;
-		return ptr;
+    void *ptr = (void *)heap_cursor;
+    heap_cursor += size;
+    return ptr;
 }
 
 void kfree(void *ptr){
-	// pass
+    // pass
 }

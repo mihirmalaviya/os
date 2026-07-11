@@ -118,16 +118,16 @@ thread_control_block_t *task_create(void (*entry)(void)) {
     tcb->time_slice_length = TIME_SLICE_LENGTH;
     tcb->irq_disable_counter = 1;
     tcb->task_id = next_task_id++;
-		// tcb->next = current_tcb->next;
-		// current_tcb->next = tcb;
+    // tcb->next = current_tcb->next;
+    // current_tcb->next = tcb;
 
-		if (last_ready_task == NULL) {
-				first_ready_task = tcb;
-				last_ready_task  = tcb;
-		} else {
-				last_ready_task->next = tcb;
-				last_ready_task = tcb;
-		}
+    if (last_ready_task == NULL) {
+        first_ready_task = tcb;
+        last_ready_task  = tcb;
+    } else {
+        last_ready_task->next = tcb;
+        last_ready_task = tcb;
+    }
 
     return tcb;
 }
@@ -260,7 +260,7 @@ void PIT_IRQ_handler(void) {
         }
     }
 
-		// Handle "end of time slice" preemption
+    // Handle "end of time slice" preemption
     if(time_slice_remaining != 0) {
         // There is a time slice length
         if(time_slice_remaining <= time_between_ticks) {
@@ -390,8 +390,8 @@ void release_mutex(SEMAPHORE *semaphore) {
 thread_control_block_t *cleaner_task_tcb;
 
 void cleanup_terminated_task(thread_control_block_t *task) {
-        kfree((void *)(task->rsp0 - TASK_STACK_SIZE));
-        kfree(task);
+    kfree((void *)(task->rsp0 - TASK_STACK_SIZE));
+    kfree(task);
 }
 
 void cleaner_task(void) {
@@ -431,7 +431,7 @@ void sched_init(void) {
     boot->next  = boot;
     current_tcb = boot;
     time_slice_remaining = boot->time_slice_length;
-		idle_task = task_create(kernel_idle_task);
-		cleaner_task_tcb = task_create(cleaner_task);
+    idle_task = task_create(kernel_idle_task);
+    cleaner_task_tcb = task_create(cleaner_task);
 }
 

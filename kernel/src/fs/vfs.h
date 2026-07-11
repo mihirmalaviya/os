@@ -30,7 +30,7 @@ typedef struct mountpoint_t {
     char device[VFS_PATH_LENGTH];
     char mountpoint[VFS_PATH_LENGTH];
 
-		// Driver provided file system operations (open/read/write/close)
+    // Driver provided file system operations (open/read/write/close)
     fs_operations_t *operations;
 
     struct mountpoint_t *next;

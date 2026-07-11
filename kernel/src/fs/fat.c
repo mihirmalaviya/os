@@ -86,7 +86,7 @@ void fat_init(uint8_t drive) {
     if (total_clusters < 4085 || total_clusters >= 65525) {
         panic("fat_init: not a FAT16 volume");
     }
-		
+
     fs.drive = drive;
     fs.bytes_per_sector = bpb->bytes_per_sector;
     fs.sectors_per_cluster = bpb->sectors_per_cluster;

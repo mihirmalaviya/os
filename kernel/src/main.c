@@ -26,7 +26,7 @@ uint64_t fb_size;
 volatile uint64_t b_counter = 0;
 
 void task_b_fn(void) {
-		unlock_scheduler();
+    unlock_scheduler();
     for (;;) {
         b_counter++;
     }
@@ -70,7 +70,7 @@ void kmain(void) {
 
     // Ensure we got a framebuffer.
     if (framebuffer_request.response == NULL
-     || framebuffer_request.response->framebuffer_count < 1) {
+            || framebuffer_request.response->framebuffer_count < 1) {
         panic("no framebuffer available");
     }
 
@@ -94,11 +94,11 @@ void kmain(void) {
     // *heap_test = 42;
     // kprintf("heap test: %d\n", (int)*heap_test);
 
-		// int *a = (int *)kmalloc(sizeof(int));
-		// *a = 10;
-		// int *b = (int *)kmalloc(sizeof(int));
-		// *b = 20;
-		// kprintf("a: %d, b: %d, a_ptr: %x, b_ptr: %x\n", *a, *b, (uint64_t)a, (uint64_t)b);
+    // int *a = (int *)kmalloc(sizeof(int));
+    // *a = 10;
+    // int *b = (int *)kmalloc(sizeof(int));
+    // *b = 20;
+    // kprintf("a: %d, b: %d, a_ptr: %x, b_ptr: %x\n", *a, *b, (uint64_t)a, (uint64_t)b);
 
     kprintf("hello kernel world!\n");
 
@@ -112,13 +112,13 @@ void kmain(void) {
     //     ms_sleep(300);
     // }
 
-		//   uint16_t boot_sector[256];
-		//   ata_read_sectors(ATA_DRIVE_SLAVE, 0, 1, boot_sector);
-		// kprintf("%x\n", boot_sector[255]);
-		//   for (int i = 0; i < 256; i++) {
-		//       kprintf("%x ", (uint64_t)boot_sector[i]);
-		//       if ((i + 1) % 8 == 0) kprintf("\n");
-		//   }
+    //   uint16_t boot_sector[256];
+    //   ata_read_sectors(ATA_DRIVE_SLAVE, 0, 1, boot_sector);
+    // kprintf("%x\n", boot_sector[255]);
+    //   for (int i = 0; i < 256; i++) {
+    //       kprintf("%x ", (uint64_t)boot_sector[i]);
+    //       if ((i + 1) % 8 == 0) kprintf("\n");
+    //   }
 
     // fat_init(ATA_DRIVE_SLAVE);
     // fat_read_root_dir();

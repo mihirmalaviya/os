@@ -30,14 +30,14 @@ static void print_char(char c) {
         return;
     }
 
-		if (cursor_x >= MAX_COLS) {
-				cursor_x = 0;
-				cursor_y++;
-				if (cursor_y >= MAX_ROWS) {
-						scroll();
-						cursor_y = MAX_ROWS - 1;
-				}
-		}
+    if (cursor_x >= MAX_COLS) {
+        cursor_x = 0;
+        cursor_y++;
+        if (cursor_y >= MAX_ROWS) {
+            scroll();
+            cursor_y = MAX_ROWS - 1;
+        }
+    }
 
     putchar((unsigned short int)c, cursor_x, cursor_y, 0xFFFFFF, 0x000000);
     cursor_x++;

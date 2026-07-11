@@ -41,10 +41,10 @@ static void tss_init(void) {
     uint64_t limit = sizeof(tss_t) - 1;
 
     gdt[5] = (limit & 0xffff)
-           | ((base & 0xffffff) << 16)
-           | (0x89ULL << 40)
-           | (((limit >> 16) & 0xf) << 48)
-           | (((base >> 24) & 0xff) << 56);
+        | ((base & 0xffffff) << 16)
+        | (0x89ULL << 40)
+        | (((limit >> 16) & 0xf) << 48)
+        | (((base >> 24) & 0xff) << 56);
     gdt[6] = (base >> 32) & 0xffffffff;
 }
 

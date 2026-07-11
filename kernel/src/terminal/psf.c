@@ -19,10 +19,10 @@ void psf_init()
 
     /* get the offset of the table */
     char *s = (char *)(
-    (unsigned char*)&_binary_font_psf_start +
-      font->headersize +
-      font->numglyph * font->bytesperglyph
-    );
+            (unsigned char*)&_binary_font_psf_start +
+            font->headersize +
+            font->numglyph * font->bytesperglyph
+            );
 
     /* allocate memory for translation table */
     unicode = NULL;
@@ -65,12 +65,12 @@ extern char _binary_font_start[];
 #define PIXEL uint32_t   /* pixel pointer */
 
 void putchar(
-    /* note that this is int, not char as it's a unicode character */
-    unsigned short int c,
-    /* cursor position on screen, in characters not in pixels */
-    int cx, int cy,
-    /* foreground and background colors, say 0xFFFFFF and 0x000000 */
-    uint32_t fg, uint32_t bg)
+        /* note that this is int, not char as it's a unicode character */
+        unsigned short int c,
+        /* cursor position on screen, in characters not in pixels */
+        int cx, int cy,
+        /* foreground and background colors, say 0xFFFFFF and 0x000000 */
+        uint32_t fg, uint32_t bg)
 {
     /* cast the address to PSF header struct */
     PSF_font *font = (PSF_font*)&_binary_font_psf_start;
@@ -81,9 +81,9 @@ void putchar(
     /* get the glyph for the character. If there's no
        glyph for a given character, we'll display the first glyph. */
     unsigned char *glyph =
-     (unsigned char*)&_binary_font_psf_start +
-     font->headersize +
-     (c>0&&c<font->numglyph?c:0)*font->bytesperglyph;
+        (unsigned char*)&_binary_font_psf_start +
+        font->headersize +
+        (c>0&&c<font->numglyph?c:0)*font->bytesperglyph;
     /* calculate the upper left corner on screen where we want to display.
        we only do this once, and adjust the offset later. This is faster. */
     int offs =
@@ -91,7 +91,7 @@ void putchar(
         (cx * (font->width + 1) * sizeof(PIXEL));
 
     /* Calculate the number of bytes for a line in a glyph. If the
-    glyph width isn't byte aligned, then it is rounded up to be byte aligned. */
+       glyph width isn't byte aligned, then it is rounded up to be byte aligned. */
     uint32_t bytesPerGlyphLine = (font->width + 7) / 8;
     /* finally display pixels according to the bitmap */
     int x, y, line;
@@ -108,7 +108,7 @@ void putchar(
             mask >>= 1;
             if (mask == 0){
                 /* We have read this byte of the glyph.
-                Reset mask and move to next byte */
+                   Reset mask and move to next byte */
                 mask = 1<<7;
                 currentByte += 1;
             }

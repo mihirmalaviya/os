@@ -38,7 +38,7 @@ int vfs_mount(char *device, char *target, char *fs_type) {
 }
 
 int vfs_umount(char *device, char *target){
-		mountpoint_t *curr = mountpoints_root;
+    mountpoint_t *curr = mountpoints_root;
     mountpoint_t *prev = NULL;
     while (curr != NULL) {
         if (strcmp(curr->mountpoint, target) == 0) {
@@ -49,10 +49,10 @@ int vfs_umount(char *device, char *target){
             }
             kfree(curr);
             return 1;
-				}
+        }
         prev = curr;
         curr = curr->next;
-		}
+    }
 
     return 0;
 }
@@ -99,7 +99,7 @@ int open(const char *path, int flags) {
     if (fs_file_id < 0)
         return -1;
 
-		// find an empty slot and add it
+    // find an empty slot and add it
     for (int i = 0; i < VFS_MAX_OPEN_FILES; i++) {
         if (vfs_open_files[i].fs_file_id < 0) {
             vfs_open_files[i].fs_file_id = fs_file_id;
@@ -108,7 +108,7 @@ int open(const char *path, int flags) {
         }
     }
 
-		// TODO dynamic array
+    // TODO dynamic array
 
     // no free vfs descriptor slots - undo the driver-level open
     mountpoint->operations->close(fs_file_id);

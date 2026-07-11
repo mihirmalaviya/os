@@ -155,7 +155,7 @@ int tar_close(int fs_file_id) {
     if (fs_file_id < 0 || fs_file_id >= TAR_MAX_OPEN_FILES || !tar_open_files[fs_file_id].in_use)
         return -1;
 
-		tar_open_files[fs_file_id].in_use=0;
+    tar_open_files[fs_file_id].in_use=0;
     return 0;
 }
 
@@ -172,22 +172,22 @@ int64_t tar_read(int fs_file_id, void *buf, uint32_t nbyte) {
         nbyte = f->size - f->position; // lower it so we arent reading past EOF
 
     uint32_t bytes_copied = 0;
-		uint8_t sector_buf[512];
+    uint8_t sector_buf[512];
 
-		while (bytes_copied < nbyte) { // keep reading from sectors until we got it all
-				uint32_t byte_offset = f->position + bytes_copied;
-				uint32_t sector = f->start_lba + byte_offset / 512;
-				uint32_t offset_in_sector = byte_offset % 512; // where to start
+    while (bytes_copied < nbyte) { // keep reading from sectors until we got it all
+        uint32_t byte_offset = f->position + bytes_copied;
+        uint32_t sector = f->start_lba + byte_offset / 512;
+        uint32_t offset_in_sector = byte_offset % 512; // where to start
 
-				ata_read_sectors(TAR_DRIVE, sector, 1, sector_buf);
+        ata_read_sectors(TAR_DRIVE, sector, 1, sector_buf);
 
-				uint32_t chunk = 512 - offset_in_sector;
-				if (chunk > nbyte - bytes_copied) chunk = nbyte - bytes_copied;
+        uint32_t chunk = 512 - offset_in_sector;
+        if (chunk > nbyte - bytes_copied) chunk = nbyte - bytes_copied;
 
-				// start for buf, start for sector buf, len
-				memcpy((uint8_t *)buf + bytes_copied, sector_buf + offset_in_sector, chunk);
-				bytes_copied += chunk;
-		}
+        // start for buf, start for sector buf, len
+        memcpy((uint8_t *)buf + bytes_copied, sector_buf + offset_in_sector, chunk);
+        bytes_copied += chunk;
+    }
 
     f->position += bytes_copied;
     return bytes_copied;
