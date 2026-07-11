@@ -34,3 +34,5 @@ typedef enum {
 } key_code_t;
 
 void keyboard_handle_irq(void);
+void keyboard_irq_handler(void *ctx);
+void keyboard_init(void);

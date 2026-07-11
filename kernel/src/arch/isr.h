@@ -9,3 +9,6 @@ typedef struct __attribute__((packed)) {
 } interrupt_frame_t;
 
 void isr_handler(interrupt_frame_t *frame);
+
+typedef void (*irq_handler_t)(void *ctx);
+void irq_register(uint8_t vector, irq_handler_t handler);

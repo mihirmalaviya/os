@@ -3,6 +3,7 @@
 #include "mm/vmm.h"
 #include "arch/gdt.h"
 #include "arch/pit.h"
+#include "arch/pic.h"
 #include "terminal/terminal.h"
 
 thread_control_block_t *current_tcb;
@@ -232,9 +233,12 @@ void unblock_task(thread_control_block_t *task) {
 }
 
 
-void PIT_IRQ_handler(void) {
+void PIT_IRQ_handler(void *ctx) {
+    (void)ctx;
     thread_control_block_t *next_task;
     thread_control_block_t *this_task;
+
+    PIC_sendEOI(0);
 
     postpone_switches();
 

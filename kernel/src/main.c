@@ -13,11 +13,12 @@
 #include "kernel.h"
 #include "tty/tty.h"
 #include "sched/task.h"
-// #include "arch/isr.h"
+#include "arch/isr.h"
 #include "fs/vfs.h"
 #include "fs/tar.h"
 #include "drivers/ata.h"
 #include "drivers/pci.h"
+#include "drivers/keyboard.h"
 // #include "fs/fat.h"
 
 char *fb;
@@ -86,6 +87,7 @@ void kmain(void) {
     idt_init();
     pic_init();
     pit_init();
+    keyboard_init();
     pmm_init();
     vmm_init();
     heap_init();

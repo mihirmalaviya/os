@@ -53,7 +53,7 @@ void unlock_stuff(void);
 void block_task(int reason);
 void unblock_task(thread_control_block_t *task);
 
-void PIT_IRQ_handler(void);
+void PIT_IRQ_handler(void *ctx);
 void check_postponed_switch(void);
 
 void nano_sleep_until(uint64_t when);

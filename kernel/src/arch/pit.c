@@ -1,5 +1,7 @@
 #include "arch/pit.h"
 #include "arch/io.h"
+#include "arch/isr.h"
+#include "sched/task.h"
 
 #define PIT_CHANNEL0 0x40
 #define PIT_COMMAND  0x43
@@ -16,6 +18,8 @@ void pit_init() {
     outb(PIT_COMMAND, 0x36); // channel 0, lobyte/hibyte, mode 3 (square wave)
     outb(PIT_CHANNEL0, divisor & 0xFF);
     outb(PIT_CHANNEL0, (divisor >> 8) & 0xFF);
+
+    irq_register(32, PIT_IRQ_handler);
 }
 
 void pit_tick(void) {

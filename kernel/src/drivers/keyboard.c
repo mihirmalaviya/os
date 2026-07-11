@@ -1,5 +1,7 @@
 #include "drivers/keyboard.h"
 #include "arch/io.h"
+#include "arch/pic.h"
+#include "arch/isr.h"
 #include "tty/tty.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -94,4 +96,14 @@ void keyboard_handle_irq(void) {
     if (c != 0) {
         tty_enqueue(c);
     }
+}
+
+void keyboard_irq_handler(void *ctx) {
+    (void)ctx;
+    keyboard_handle_irq();
+    PIC_sendEOI(1);
+}
+
+void keyboard_init(void) {
+    irq_register(33, keyboard_irq_handler);
 }
