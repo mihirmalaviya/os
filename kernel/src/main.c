@@ -19,7 +19,11 @@
 #include "drivers/ata.h"
 #include "drivers/pci.h"
 #include "drivers/keyboard.h"
-// #include "fs/fat.h"
+#include "drivers/rtl8139.h"
+#include "net/loopback.h"
+#include "net/eth.h"
+#include "net/icmp.h"
+#include "lib/string.h"
 
 char *fb;
 int scanline;
@@ -97,11 +101,18 @@ void kmain(void) {
 
     pci_scan();
     // pci_print_devices();
+    rtl8139_init();
+    loopback_init();
 
     sched_init();
     task_create(task_b_fn);
 
     __asm__ volatile ("sti");
+    
+    kprintf("ping 8.8.8.8\n");
+    int time = icmp_ping(rtl8139_netdev(), 0x08080808);
+    kprintf("recieved, time=%dms\n", time);
+
 
     // uint64_t *heap_test = (uint64_t *)0x444444440000ULL;
     // *heap_test = 42;

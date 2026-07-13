@@ -116,7 +116,7 @@ void IRQ_clear_mask(uint8_t IRQline) {
         IRQline -= 8;
     }
     value = inb(port) & ~(1 << IRQline);
-    outb(port, value);        
+    outb(port, value);
 }
 
 /*
@@ -134,6 +134,7 @@ void pic_init(void) {
     // unmask
     IRQ_clear_mask(0); // timer
     IRQ_clear_mask(1); // keyboard
+    IRQ_clear_mask(2); // cascade
 }
 
 

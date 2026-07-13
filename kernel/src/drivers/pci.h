@@ -37,4 +37,7 @@ void pci_scan(void);
 // returns the first recorded device matching class/subclass, or NULL
 pci_device_t *pci_find_device(uint8_t class_code, uint8_t subclass);
 
+// allows the device to read/write RAM on its own (DMA); off by default
+void pci_enable_bus_mastering(pci_device_t *dev);
+
 void pci_print_devices(void);

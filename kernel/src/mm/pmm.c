@@ -100,6 +100,25 @@ uint64_t pmm_alloc(void) {
     return 0;
 }
 
+uint64_t pmm_alloc_contig(size_t n){
+    int run=0;
+    for (size_t i=0; i<pmm_total_pages; i++){
+        if (bitmap_get(i)==0) {
+            run++;
+            if (run==n){
+                for (size_t j=i-n+1; j<=i; j++)
+                    bitmap_set(j);
+                uint64_t phys = (i-n+1) * PAGE_SIZE;
+                memset((uint8_t *)(phys + pmm_hhdm_offset), 0, PAGE_SIZE*n);
+                return phys;
+            }
+        } else {
+            run=0;
+        }
+    }
+    return 0;
+}
+
 void pmm_free(uint64_t phys) {
     bitmap_clear(phys / PAGE_SIZE);
 }
