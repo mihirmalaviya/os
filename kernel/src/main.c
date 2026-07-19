@@ -7,6 +7,7 @@
 #include "arch/idt.h"
 #include "arch/pic.h"
 #include "arch/pit.h"
+#include "arch/irq.h"
 #include "mm/pmm.h"
 #include "mm/vmm.h"
 #include "mm/heap.h"
@@ -20,9 +21,8 @@
 #include "drivers/pci.h"
 #include "drivers/keyboard.h"
 #include "drivers/rtl8139.h"
-#include "net/loopback.h"
 #include "net/eth.h"
-#include "net/icmp.h"
+#include "net/tcp.h"
 #include "lib/string.h"
 
 char *fb;
@@ -101,18 +101,13 @@ void kmain(void) {
 
     pci_scan();
     // pci_print_devices();
-    rtl8139_init();
-    loopback_init();
+    rtl8139_init(pci_find_device(2, 0));
+    tcp_listen(rtl8139_netdev(), 80);
 
     sched_init();
     task_create(task_b_fn);
 
-    __asm__ volatile ("sti");
-    
-    kprintf("ping 8.8.8.8\n");
-    int time = icmp_ping(rtl8139_netdev(), 0x08080808);
-    kprintf("recieved, time=%dms\n", time);
-
+    sti();
 
     // uint64_t *heap_test = (uint64_t *)0x444444440000ULL;
     // *heap_test = 42;

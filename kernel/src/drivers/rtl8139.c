@@ -7,6 +7,7 @@
 #include "mm/dma.h"
 #include "net/netdev.h"
 #include "net/eth.h"
+#include "net/pool.h"
 #include "sched/task.h"
 #include "lib/string.h"
 #include "terminal/terminal.h"
@@ -23,16 +24,25 @@
 static uint16_t io_base;
 static uint8_t irq_line;
 
-static netdev_t rtl_netdev;
+static net_device_t rtl_netdev;
 
 static dma_buf_t rx_buf;
 static int rx_offset; // where we've read up to in the rx ring
 
 static dma_buf_t tx_buf;
-static int tx_head;       // next empty slot
-static int tx_oldest;     // oldest slot that hasnt finished yet
-static int tx_inflight;   // slots that we are waiting on to finish
-static SEMAPHORE *tx_sem; // counts free slots
+static int tx_head;      // next empty slot
+static int tx_oldest;    // oldest slot that hasnt finished yet
+static int tx_inflight;  // slots that we are waiting on to finish
+static SEMAPHORE tx_sem; // counts free slots
+
+#define RXQ_N 64
+typedef struct {
+    uint8_t *buf; // pool-buffer pointer (not the bytes)
+    uint16_t len; // length of the queued frame
+} rxq_entry_t;
+static rxq_entry_t rxq[RXQ_N];
+static unsigned    rxq_in, rxq_out; // write (irq) / read (drainer)
+static SEMAPHORE   rx_ready;     // counts frames waiting in the ring
 
 static uint8_t *tx_slot_virt(int slot) {
     return (uint8_t *)tx_buf.virt + slot * RTL8139_TX_SLOT_SIZE;
@@ -42,15 +52,27 @@ static uint32_t tx_slot_phys(int slot) {
     return (uint32_t)(tx_buf.phys + slot * RTL8139_TX_SLOT_SIZE);
 }
 
-static int rtl8139_send(netdev_t *dev, const void *frame, size_t len);
+static int rtl8139_send(net_device_t *dev, const void *frame, size_t len);
 
 static void rtl8139_reset(uint16_t io_base) {
     outb(io_base + 0x37, 0x10);
     while (inb(io_base + 0x37) & 0x10){} // block until its good
 }
 
-void rtl8139_init(void) {
-    pci_device_t *dev = pci_find_device(2,0);
+// drains the rx mailbox and runs the protocol stack. a real task, so it may
+// block (eth_process -> arp reply -> rtl8139_send can wait on tx_sem).
+static void rx_drainer(void) {
+    for (;;) {
+        semaphore_acquire(&rx_ready);       // sleeps until the irq enqueues a frame
+        uint8_t *buf = rxq[rxq_out % RXQ_N].buf;
+        uint16_t len = rxq[rxq_out % RXQ_N].len;
+        rxq_out++;
+        eth_process(&rtl_netdev, buf, len);
+        pool_free(buf);
+    }
+}
+
+void rtl8139_init(pci_device_t *dev) {
     if (!dev) {
         kprintf("rtl8139 not found");
         return;
@@ -86,7 +108,7 @@ void rtl8139_init(void) {
     tx_head = 0;
     tx_oldest = 0;
     tx_inflight = 0;
-    tx_sem = create_semaphore(RTL8139_TX_SLOTS);
+    semaphore_init(&tx_sem, RTL8139_TX_SLOTS);
 
 
     outw(io_base + 0x3C, 0x0005); // Sets the TOK and ROK bits high
@@ -109,18 +131,23 @@ void rtl8139_init(void) {
     rtl_netdev.netmask = 0xFFFFFF00; // 255.255.255.0
     rtl_netdev.gateway = 0x0A000202; // 10.0.2.2, qemu's router (= the host)
     rtl_netdev.send    = rtl8139_send;
+
+    // rx pipeline: pool of buffers, mailbox doorbell, and the drainer task
+    pool_init();
+    semaphore_init(&rx_ready, 0);
+    task_create(rx_drainer);
 }
 
-netdev_t *rtl8139_netdev(void) {
+net_device_t *rtl8139_netdev(void) {
     return &rtl_netdev;
 }
 
 // only reachable through the netdev record; the stack calls dev->send
-static int rtl8139_send(netdev_t *dev, const void *frame, size_t len) {
+static int rtl8139_send(net_device_t *dev, const void *frame, size_t len) {
     (void)dev; // only one card, the statics already point at it
     if (len > 1792) return -1; // hardware limit per slot
 
-    acquire_semaphore(tx_sem); // sleeps here if all 4 slots are in flight
+    semaphore_acquire(&tx_sem); // sleeps here if all 4 slots are in flight
 
     int slot = tx_head;
     tx_head = (tx_head + 1) % RTL8139_TX_SLOTS;
@@ -151,6 +178,10 @@ void rtl8139_irq_handler(void *ctx) {
     uint16_t status = inw(io_base + 0x3E);
     outw(io_base + 0x3E, status); // write back to ack, or it re-fires forever
 
+    // wraps the task-waking so switches are deferred to check_postponed_switch()
+    // on isr exit instead of happening inline here
+    postpone_switches();
+
     // packet finished sending
     if (status & RTL8139_ISR_TOK) {
         while (tx_inflight > 0) {
@@ -162,12 +193,13 @@ void rtl8139_irq_handler(void *ctx) {
 
             tx_oldest = (tx_oldest+1) % RTL8139_TX_SLOTS;
             tx_inflight--;
-            release_semaphore(tx_sem);
+            semaphore_release_from_irq(&tx_sem);
         }
         // kprintf("RTL8139: Sent Packet\n");
     }
 
     // Received
+    // put it in pool buffer, and wake drainer
     if (status & RTL8139_ISR_ROK) {
         while (!(inb(io_base + 0x37) & 0x01)) { // while leftmost bit is == 0
                                                 // 0 = at least one frame is waiting
@@ -175,15 +207,27 @@ void rtl8139_irq_handler(void *ctx) {
             uint8_t *frame = (uint8_t *)rx_buf.virt + rx_offset;
             rx_prefix_t *prefix = (rx_prefix_t *)frame; // first 2 bytes is status, next 2 bytes is len
 
-            if (prefix->status & 0x01) // frame arrived intact
-                eth_rx(&rtl_netdev, frame+4, prefix->len - 4); // frame+4 because the first 4 bytes were storing status/len
+            if (prefix->status & 0x01) { // frame arrived intact
+                uint16_t len = prefix->len - 4; // drop the 4-byte status/len prefix
+                uint8_t *buf = pool_alloc();
+                if (buf!=NULL && len<=POOL_SIZE && (rxq_in-rxq_out)<RXQ_N) {
+                    memcpy(buf, frame+4, len);
+                    rxq[rxq_in%RXQ_N].buf = buf;
+                    rxq[rxq_in%RXQ_N].len = len;
+                    rxq_in++;
+                    semaphore_release_from_irq(&rx_ready);
+                } else if (buf!=NULL) {
+                    pool_free(buf); // ring cant fit it, so drop it
+                }
+            }
 
-            rx_offset = (rx_offset + 4+prefix->len +3)&~3; // prefix + frame, round to next multiple of 4
+            rx_offset = (rx_offset + 4+prefix->len +3)&~3; // prefix+frame, round to next multiple of 4
             rx_offset %= 8192;
             outw(io_base + 0x38, rx_offset - 16);
         }
         // kprintf("RTL8139: Recieved Packet\n");
     }
 
+    unpostpone_switches();
     PIC_sendEOI(irq_line);
 }

@@ -1,124 +1,77 @@
 #include "net/udp.h"
 #include "net/ipv4.h"
+#include "net/pkt.h"
 #include "net/byteorder.h"
-#include "lib/string.h"
-#include "terminal/terminal.h"
 #include "sched/task.h"
+#include "lib/string.h"
 #include <stdint.h>
 
-#define UDP_PROTO 17
+#define UDP_MAX_PAYLOAD 1472
+
+typedef struct {
+    uint16_t src_port;
+    uint16_t dst_port;
+    uint16_t length;   // header + payload
+    uint16_t checksum;
+} __attribute__((packed)) udp_header_t;
 
 #define UDP_BIND_TABLE_SIZE 16
-#define UDP_RING_SIZE 8192 // total bytes reserved per bound port, shared across however many packets fit
+#define UDP_RING_SIZE       8192
 
-// each queued packet is stored back-to-back in the ring as: this header, then `len` bytes of data
 typedef struct {
     uint32_t src_ip;
     uint16_t src_port;
     uint16_t len;
-} udp_record_header_t;
+} udp_record_t;
 
 typedef struct {
-    uint16_t port;
-    int in_use;
-
-    uint8_t ring[UDP_RING_SIZE];
-    size_t write_pos; // next byte udp_rx writes to
-    size_t read_pos;  // next byte udp_recv reads from
-    size_t used;      // bytes currently occupied, across all queued packets
-
-    SEMAPHORE *sem; // signals "at least one full packet is available"
+    uint16_t  port;
+    int       in_use;
+    uint8_t   ring[UDP_RING_SIZE];
+    unsigned  write_pos;
+    unsigned  read_pos;
+    SEMAPHORE sem; // # of stuff to read
 } udp_bind_entry_t;
+// used = write_pos-read_pos
+// free = UDP_RING_SIZE-used
 
 static udp_bind_entry_t udp_bind_table[UDP_BIND_TABLE_SIZE];
 
-// write to ring buffer
-static void ring_write(udp_bind_entry_t *entry, const uint8_t *src, size_t n) {
-    for (size_t i=0; i<n; i++) {
-        entry->ring[entry->write_pos] = src[i];
-        entry->write_pos = (entry->write_pos + 1) % UDP_RING_SIZE;
-    }
+// push to ring buffer
+static void ring_write(udp_bind_entry_t *e, const void *src, unsigned len) {
+    const uint8_t *data = src;
+    unsigned start = e->write_pos%UDP_RING_SIZE;
+    unsigned first_len = UDP_RING_SIZE-start; // distance from start to end in bytes
+    if (first_len>len) first_len=len;
+    memcpy(e->ring+start, data, first_len); //from our start to actual end
+    memcpy(e->ring, data+first_len, len-first_len); //wrap (from actual start to our end)
+    e->write_pos += len;
 }
 
-// read from ring buffer
-static void ring_read(udp_bind_entry_t *entry, uint8_t *dst, size_t n) {
-    for (size_t i=0; i<n; i++) {
-        uint8_t byte = entry->ring[entry->read_pos];
-        if (dst) dst[i] = byte;
-        entry->read_pos = (entry->read_pos + 1) % UDP_RING_SIZE;
-    }
+// pop from ring buffer
+static void ring_read(udp_bind_entry_t *e, void *dst, unsigned len) {
+    uint8_t *data = dst;
+    unsigned start = e->read_pos%UDP_RING_SIZE;
+    unsigned first_len = UDP_RING_SIZE-start; // distance from start to end in bytes
+    if (first_len>len) first_len=len;
+    memcpy(data, e->ring+start, first_len); //from our start to actual end
+    memcpy(data+first_len, e->ring, len-first_len); //wrap (from actual start to our end)
+    e->read_pos += len;
 }
 
-// the 8-byte header every udp packet starts with
-typedef struct {
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t length;
-    uint16_t checksum;
-} __attribute__((packed)) udp_header_t;
-
-void udp_rx(netdev_t *dev, const void *frame, size_t len, uint32_t src_ip) {
-    const udp_header_t *header = (const udp_header_t *)frame;
-    uint16_t dst_port = ntohs(header->dst_port);
-    size_t data_len = len - sizeof(udp_header_t);
-
-    // find the right port
-    for (int i = 0; i < UDP_BIND_TABLE_SIZE; i++) {
-        if (!udp_bind_table[i].in_use || udp_bind_table[i].port != dst_port)
-            continue;
-
-        udp_bind_entry_t *entry = &udp_bind_table[i];
-        size_t record_size = sizeof(udp_record_header_t) + data_len;
-
-        // if it cant fit drop it
-        if (entry->used + record_size > UDP_RING_SIZE)
-            return;
-
-        // since we have parsed the udp packet already we just need to keep track of these 3 things
-        udp_record_header_t rec;
-        rec.src_ip = src_ip;
-        rec.src_port = ntohs(header->src_port);
-        rec.len = (uint16_t)data_len;
-
-        // write the record header and the data we recieved
-        ring_write(entry, (const uint8_t *)&rec, sizeof(rec));
-        ring_write(entry, (const uint8_t *)frame + sizeof(udp_header_t), data_len);
-        entry->used += record_size;
-
-        release_semaphore(entry->sem);
-        return;
-    }
-    // nothing matched :(
-}
-
-int udp_send(netdev_t *dev, uint32_t dst_ip, uint16_t dst_port, uint16_t src_port,
-             const void *payload, size_t len) {
-    const size_t pkt_len = sizeof(udp_header_t) + len;
-    uint8_t buf[pkt_len];
-    udp_header_t *header = (udp_header_t *)buf;
-
-    header->src_port = htons(src_port);
-    header->dst_port = htons(dst_port);
-    header->length = htons((uint16_t)pkt_len);
-    header->checksum = 0; // TODO checksum
-
-    memcpy(buf + sizeof(udp_header_t), payload, len);
-    return ipv4_send(dev, dst_ip, UDP_PROTO, buf, pkt_len);
-}
-
-// find a free space in the bind table and bind the port in our table; if there is no space return -1
-// TODO dynamically sized dictionary or some other good data structure for this
 int udp_bind(uint16_t port) {
-    for (int i = 0; i < UDP_BIND_TABLE_SIZE; i++) {
+    // already bound?
+    for (int i=0; i<UDP_BIND_TABLE_SIZE; i++)
+        if (udp_bind_table[i].in_use && udp_bind_table[i].port==port)
+            return -1;
+
+    // find a free slot
+    for (int i=0; i<UDP_BIND_TABLE_SIZE; i++) {
         if (!udp_bind_table[i].in_use) {
             udp_bind_table[i].port = port;
             udp_bind_table[i].write_pos = 0;
             udp_bind_table[i].read_pos = 0;
-            udp_bind_table[i].used = 0;
-
-            udp_bind_table[i].sem = create_semaphore(1);
-            acquire_semaphore(udp_bind_table[i].sem);
-
+            semaphore_init(&udp_bind_table[i].sem, 0);
             udp_bind_table[i].in_use = 1;
             return 0;
         }
@@ -126,37 +79,82 @@ int udp_bind(uint16_t port) {
     return -1; // table full
 }
 
-int udp_recv(uint16_t port, uint32_t *src_ip, uint16_t *src_port, void *buf, size_t buflen) {
-    udp_bind_entry_t *entry = NULL;
+// drainer task calls this, this processes the task and puts it into the array
+void udp_process(const void *buffer, size_t len, uint32_t src_ip) {
+    if (len < sizeof(udp_header_t)) return;
+    const udp_header_t *header = (const udp_header_t *)buffer;
 
-    // find the port
-    for (int i = 0; i < UDP_BIND_TABLE_SIZE; i++) {
-        if (udp_bind_table[i].in_use && udp_bind_table[i].port == port) {
-            entry = &udp_bind_table[i];
+    uint16_t dst_port = ntohs(header->dst_port);
+    unsigned data_len = len-sizeof(udp_header_t);
+
+    // find the port; if nobodys bound, drop it
+    udp_bind_entry_t *e = NULL;
+    for (int i=0; i<UDP_BIND_TABLE_SIZE; i++) {
+        if (udp_bind_table[i].in_use && udp_bind_table[i].port == dst_port) {
+            e = &udp_bind_table[i];
             break;
         }
     }
-    if (!entry) return -1; // port was never bound
+    if (!e) return;
 
-    acquire_semaphore(entry->sem); // blocks here until udp_rx enqueues something
+    unsigned record_size = sizeof(udp_record_t)+data_len;
+    unsigned used = e->write_pos - e->read_pos;
+    if (used+record_size>UDP_RING_SIZE) // can it fit? no=drop
+        return;
 
-    // read the header
-    udp_record_header_t rec;
-    ring_read(entry, (uint8_t *)&rec, sizeof(rec));
+    // it can fit, add it
+    udp_record_t rec = {
+        .src_ip   = src_ip,
+        .src_port = ntohs(header->src_port),
+        .len      = (uint16_t)data_len,
+    };
+    ring_write(e, &rec, sizeof(rec));
+    ring_write(e, (const uint8_t *)buffer + sizeof(udp_header_t), data_len);
 
-    // read the datas
-    size_t copy_len = rec.len < buflen ? rec.len : buflen;
-    ring_read(entry, (uint8_t *)buf, copy_len);
+    semaphore_release(&e->sem);
+}
 
-    // TODO signal truncation so user knows we truncated, maube return actual len instead of copylen, idk
-    if (rec.len > copy_len) {
-        ring_read(entry, NULL, rec.len - copy_len); // caller's buffer was too small, discard the rest
+int udp_send(net_device_t *dev, uint32_t dst_ip, uint16_t dst_port, uint16_t src_port, const void *payload, size_t len) {
+    if (len>UDP_MAX_PAYLOAD) return -1;
+
+    uint8_t p_buf[PBUF_HEADROOM + sizeof(udp_header_t) + UDP_MAX_PAYLOAD];
+    pbuf_t p;
+    pbuf_init(&p, p_buf, PBUF_HEADROOM + len, PBUF_HEADROOM); // sz = payload only; header prepended below
+
+    memcpy(p.data, payload, len);
+
+    udp_header_t *header = (udp_header_t *)pbuf_add_header(&p, sizeof(udp_header_t));
+    header->src_port = htons(src_port);
+    header->dst_port = htons(dst_port);
+    header->length = htons(sizeof(udp_header_t)+len);
+    header->checksum = 0;
+
+    return ipv4_send(dev, dst_ip, IPV4_PROTO_UDP, &p);
+}
+
+int udp_recv(uint16_t port, uint32_t *src_ip, uint16_t *src_port, void *buf, size_t buflen) {
+    // find the bound entry
+    udp_bind_entry_t *e = NULL;
+    for (int i=0; i<UDP_BIND_TABLE_SIZE; i++) {
+        if (udp_bind_table[i].in_use && udp_bind_table[i].port==port) {
+            e = &udp_bind_table[i];
+            break;
+        }
     }
+    if (!e) return -1; // port was never bound
 
-    entry->used -= sizeof(rec) + rec.len; // update to keep track of used space
+    semaphore_acquire(&e->sem); // blocks until something is in the q
 
-    // return the info
-    *src_ip = rec.src_ip;
-    *src_port = rec.src_port;
+    // read the record header, then its data
+    udp_record_t rec;
+    ring_read(e, &rec, sizeof(rec));
+
+    // udp is message-oriented: copy what fits, discard the rest of this datagram
+    unsigned copy_len = rec.len < buflen ? rec.len : (unsigned)buflen;
+    ring_read(e, buf, copy_len);
+    e->read_pos += rec.len-copy_len; // skip the truncated remainder
+
+    if (src_ip) *src_ip = rec.src_ip;
+    if (src_port) *src_port = rec.src_port;
     return (int)copy_len;
 }
