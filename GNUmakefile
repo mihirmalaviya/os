@@ -31,7 +31,7 @@ run: $(IMAGE_NAME).iso
 		-M pc \
 		-hda $(IMAGE_NAME).hdd \
 		-hdb data.hdd \
-		-netdev user,id=net0 \
+		-netdev user,id=net0,hostfwd=tcp::5555-10.0.2.15:80 \
 		-device rtl8139,netdev=net0 \
 		$(QEMUFLAGS)
 
