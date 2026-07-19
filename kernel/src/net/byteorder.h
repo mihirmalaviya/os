@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-// x86 is little-endian, the wire is always big-endian ("network order").
+// h = little endian, n = big endian
 // h = host, n = network, s = short (16-bit), l = long (32-bit)
 static inline uint16_t htons(uint16_t x) { return __builtin_bswap16(x); }
 static inline uint16_t ntohs(uint16_t x) { return __builtin_bswap16(x); }

@@ -83,7 +83,7 @@ static void check_function(uint8_t bus, uint8_t device, uint8_t function) {
         if (bar == 0) {
             dev->bar[i] = 0;
             dev->bar_type[i] = PCI_BAR_NONE;
-        } else if (bar & 0x1) {
+        } else if (bar & 0x1) { // if bit 0 is set, its I/O space bar
             dev->bar[i] = bar & ~0x3;
             dev->bar_type[i] = PCI_BAR_PIO;
         } else {
@@ -97,7 +97,7 @@ static void check_device(uint8_t bus, uint8_t device) {
     uint8_t function = 0;
 
     uint16_t vendorID = get_vendor_id(bus, device, function);
-    if (vendorID == 0xFFFF) return; // device doesn't exist
+    if (vendorID == 0xFFFF) return; // device doesnt exist
 
     check_function(bus, device, function);
 

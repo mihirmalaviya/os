@@ -4,20 +4,21 @@
 #include "arch/gdt.h"
 #include "arch/pit.h"
 #include "arch/pic.h"
+#include "arch/irq.h"
 #include "terminal/terminal.h"
 
 thread_control_block_t *current_tcb;
 thread_control_block_t *idle_task;
 
 void lock_scheduler(void) {
-    asm volatile ("cli");
+    cli();
     current_tcb->irq_disable_counter++;
 }
 
 void unlock_scheduler(void) {
     current_tcb->irq_disable_counter--;
     if (current_tcb->irq_disable_counter == 0) {
-        asm volatile ("sti");
+        sti();
     }
 }
 
@@ -25,7 +26,7 @@ static int postpone_task_switches_counter = 0;
 static int task_switches_postponed_flag = 0;
 
 void lock_stuff(void) {
-    asm volatile ("cli");
+    cli();
     current_tcb->irq_disable_counter++;
     postpone_task_switches_counter++;
 }
@@ -40,7 +41,7 @@ void unlock_stuff(void) {
     }
     current_tcb->irq_disable_counter--;
     if (current_tcb->irq_disable_counter == 0) {
-        asm volatile ("sti");
+        sti();
     }
 }
 
@@ -330,24 +331,14 @@ void terminate_task(void) {
     unlock_stuff();
 }
 
-SEMAPHORE *create_semaphore(int max_count) {
-    SEMAPHORE * semaphore;
-
-    semaphore = kmalloc(sizeof(SEMAPHORE));
-    if(semaphore != NULL) {
-        semaphore->max_count = max_count;
-        semaphore->current_count = 0;
-        semaphore->first_waiting_task = NULL;
-        semaphore->last_waiting_task = NULL;
-    }
-    return semaphore;
+void semaphore_init(SEMAPHORE *semaphore, int max_count) {
+    semaphore->max_count = max_count;
+    semaphore->current_count = 0;
+    semaphore->first_waiting_task = NULL;
+    semaphore->last_waiting_task = NULL;
 }
 
-SEMAPHORE *create_mutex(void) {
-    return create_semaphore(1);
-}
-
-void acquire_semaphore(SEMAPHORE *semaphore) {
+void semaphore_acquire(SEMAPHORE *semaphore) {
     lock_stuff();
     if(semaphore->current_count < semaphore->max_count) {
         // We can acquire now
@@ -367,10 +358,10 @@ void acquire_semaphore(SEMAPHORE *semaphore) {
 }
 
 void acquire_mutex(SEMAPHORE *semaphore) {
-    acquire_semaphore(semaphore);
+    semaphore_acquire(semaphore);
 }
 
-void release_semaphore(SEMAPHORE * semaphore) {
+void semaphore_release(SEMAPHORE *semaphore) {
     lock_stuff();
 
     if(semaphore->first_waiting_task != NULL) {
@@ -387,8 +378,19 @@ void release_semaphore(SEMAPHORE * semaphore) {
     unlock_stuff();
 }
 
+void semaphore_release_from_irq(SEMAPHORE *semaphore) {
+    if (semaphore->first_waiting_task!=NULL) {
+        thread_control_block_t *task = semaphore->first_waiting_task;
+        semaphore->first_waiting_task = task->next;
+        __unblock_task(task);
+    } else {
+        // No tasks are waiting
+        semaphore->current_count--;
+    }
+}
+
 void release_mutex(SEMAPHORE *semaphore) {
-    release_semaphore(semaphore);
+    semaphore_release(semaphore);
 }
 
 thread_control_block_t *cleaner_task_tcb;

@@ -59,7 +59,7 @@ static char keycode_to_ascii(key_code_t key) {
     char c = (char)key;
 
     if (shift_held) {
-        if (c >= 'a' && c <= 'z') return c - 32;
+        if (c >= 'a' && c <= 'z') return c-32;
         return shifted_symbol(c);
     }
 
@@ -72,7 +72,7 @@ void keyboard_handle_irq(void) {
     bool released = scancode & 0x80;
     if (released) scancode &= 0x7F;
 
-    if (scancode > SC_MAX) return;
+    if (scancode>SC_MAX) return;
 
     key_code_t key = scancode_to_keycode[scancode];
 
@@ -88,12 +88,12 @@ void keyboard_handle_irq(void) {
     if (released) return;
 
     if (ctrl_held && key == KEY_L) {
-        tty_enqueue(0x0C); // ASCII form feed, traditional ^L clear-screen
+        tty_enqueue(0x0C); // ^L clear-screen
         return;
     }
 
     char c = keycode_to_ascii(key);
-    if (c != 0) {
+    if (c!=0) {
         tty_enqueue(c);
     }
 }

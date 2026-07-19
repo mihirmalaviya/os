@@ -11,8 +11,6 @@ typedef enum {
     TCB_TERMINATED,
 } tcb_state_t;
 
-// TODO: fields will grow as the tutorial steps land (time accounting,
-// sleep_expiry, scheduling policy/priority, ...)
 typedef struct thread_control_block {
     uint64_t rsp;      // saved kernel stack pointer (switch_to_task reads/writes this)
     uint64_t rsp0;     // top of this task's kernel stack (loaded into TSS.rsp0 on switch)
@@ -63,9 +61,12 @@ void ms_sleep(uint64_t milliseconds);
 void terminate_task(void);
 void print_tasks(void);
 
-SEMAPHORE *create_semaphore(int max_count);
-SEMAPHORE *create_mutex(void);
-void acquire_semaphore(SEMAPHORE *semaphore);
+void semaphore_init(SEMAPHORE *semaphore, int max_count);
+void semaphore_acquire(SEMAPHORE *semaphore);
 void acquire_mutex(SEMAPHORE *semaphore);
-void release_semaphore(SEMAPHORE *semaphore);
+void semaphore_release(SEMAPHORE *semaphore);
+void semaphore_release_from_irq(SEMAPHORE *semaphore); // wake a waiter from an irq handler
 void release_mutex(SEMAPHORE *semaphore);
+
+void postpone_switches(void);
+void unpostpone_switches(void);

@@ -1,7 +1,6 @@
 #pragma once
 
-// scancode set 1 -> keycode. non-ascii keys get a sentinel value
-// above 0xFF so they can't collide with any real ascii character.
+// scancode set 1 -> keycode
 typedef enum {
     KEY_UNKNOWN   = 0,
 

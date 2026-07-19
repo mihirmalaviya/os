@@ -2,7 +2,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// one buffer, two names: phys for the device, virt for the cpu
 typedef struct {
     uint64_t phys;
     void *virt;
