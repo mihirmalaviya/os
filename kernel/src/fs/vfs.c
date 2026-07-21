@@ -2,6 +2,7 @@
 #include "fs/tar.h"
 #include "fs/proc.h"
 #include "mm/heap.h"
+#include "sched/task.h"
 #include <string.h>
 
 mountpoint_t *mountpoints_root;
@@ -78,6 +79,13 @@ mountpoint_t *get_mountpoint(const char *path) {
 
 static vfs_file_t vfs_open_files[VFS_MAX_OPEN_FILES];
 
+// resolve an fd to its open-file slot, or NULL if the fd is invalid/unused
+static vfs_file_t *get_file(int fd) {
+    if (fd < 0 || fd >= VFS_MAX_OPEN_FILES || vfs_open_files[fd].fs_file_id < 0)
+        return NULL;
+    return &vfs_open_files[fd];
+}
+
 // strips the mountpoint prefix off path
 static const char *get_rel_path(mountpoint_t *mountpoint, const char *path) {
     int len = 0;
@@ -116,37 +124,63 @@ int open(const char *path, int flags) {
 }
 
 int close(int fd) {
-    if (fd < 0 || fd >= VFS_MAX_OPEN_FILES || vfs_open_files[fd].fs_file_id < 0)
-        return -1;
+    vfs_file_t *f = get_file(fd);
+    if (!f) return -1;
 
-    mountpoint_t *mountpoint = vfs_open_files[fd].mountpoint;
-    int result = mountpoint->operations->close(vfs_open_files[fd].fs_file_id);
+    int result = f->mountpoint->operations->close(f->fs_file_id);
 
-    vfs_open_files[fd].fs_file_id = -1;
-    vfs_open_files[fd].mountpoint = NULL;
+    f->fs_file_id = -1;
+    f->mountpoint = NULL;
 
     return result;
 }
 
 int64_t read(int fd, void *buf, uint32_t nbyte) {
-    if (fd < 0 || fd >= VFS_MAX_OPEN_FILES || vfs_open_files[fd].fs_file_id < 0)
-        return -1;
+    vfs_file_t *f = get_file(fd);
+    if (!f) return -1;
+    return f->mountpoint->operations->read(f->fs_file_id, buf, nbyte);
+}
 
-    mountpoint_t *mountpoint = vfs_open_files[fd].mountpoint;
-    return mountpoint->operations->read(vfs_open_files[fd].fs_file_id, buf, nbyte);
+int64_t write(int fd, const void *buf, uint32_t nbyte) {
+    vfs_file_t *f = get_file(fd);
+    if (!f) return -1;
+    return f->mountpoint->operations->write(f->fs_file_id, buf, nbyte);
+}
+
+// reserve a fd for something with no path
+int vfs_install_fd(mountpoint_t *mp, int fs_file_id) {
+    lock_stuff();
+    for (int i=0; i<VFS_MAX_OPEN_FILES; i++){
+        if (vfs_open_files[i].fs_file_id<0){
+            vfs_open_files[i].fs_file_id = fs_file_id;
+            vfs_open_files[i].mountpoint = mp;
+            unlock_stuff();
+            return i;
+        }
+    }
+    unlock_stuff();
+    return -1;
+}
+
+// map an fd back to its id
+int vfs_fs_id(int fd) {
+    vfs_file_t *f = get_file(fd);
+    if (!f) 
+        return -1;
+    return f->fs_file_id;
 }
 
 int opendir(const char *path) {
     mountpoint_t *mountpoint = get_mountpoint(path);
-    if (mountpoint == NULL || mountpoint->operations == NULL)
+    if (mountpoint==NULL || mountpoint->operations==NULL)
         return -1;
 
     const char *rel_path = get_rel_path(mountpoint, path);
     int fs_dir_id = mountpoint->operations->opendir(rel_path);
-    if (fs_dir_id < 0)
+    if (fs_dir_id<0)
         return -1;
 
-    for (int i = 0; i < VFS_MAX_OPEN_FILES; i++) {
+    for (int i=0; i<VFS_MAX_OPEN_FILES; i++) {
         if (vfs_open_files[i].fs_file_id < 0) {
             vfs_open_files[i].fs_file_id = fs_dir_id;
             vfs_open_files[i].mountpoint = mountpoint;
@@ -159,28 +193,25 @@ int opendir(const char *path) {
 }
 
 int closedir(int fd) {
-    if (fd < 0 || fd >= VFS_MAX_OPEN_FILES || vfs_open_files[fd].fs_file_id < 0)
-        return -1;
+    vfs_file_t *f = get_file(fd);
+    if (!f) return -1;
 
-    mountpoint_t *mountpoint = vfs_open_files[fd].mountpoint;
-    int result = mountpoint->operations->closedir(vfs_open_files[fd].fs_file_id);
+    int result = f->mountpoint->operations->closedir(f->fs_file_id);
 
-    vfs_open_files[fd].fs_file_id = -1;
-    vfs_open_files[fd].mountpoint = NULL;
+    f->fs_file_id = -1;
+    f->mountpoint = NULL;
 
     return result;
 }
 
 int readdir(int fd, vfs_dirent_t *out) {
-    if (fd < 0 || fd >= VFS_MAX_OPEN_FILES || vfs_open_files[fd].fs_file_id < 0)
-        return -1;
-
-    mountpoint_t *mountpoint = vfs_open_files[fd].mountpoint;
-    return mountpoint->operations->readdir(vfs_open_files[fd].fs_file_id, out);
+    vfs_file_t *f = get_file(fd);
+    if (!f) return -1;
+    return f->mountpoint->operations->readdir(f->fs_file_id, out);
 }
 
 void vfs_init(void) {
-    for (int i = 0; i < VFS_MAX_OPEN_FILES; i++) {
+    for (int i=0; i<VFS_MAX_OPEN_FILES; i++) {
         vfs_open_files[i].fs_file_id = -1;
     }
 

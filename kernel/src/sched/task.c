@@ -331,6 +331,7 @@ void terminate_task(void) {
     unlock_stuff();
 }
 
+
 void semaphore_init(SEMAPHORE *semaphore, int max_count) {
     semaphore->max_count = max_count;
     semaphore->current_count = 0;

@@ -34,8 +34,12 @@ void ipv4_process(net_device_t *dev, const void *buffer, size_t len) {
     if (ntohl(header->dst_ip) != dev->ip)
         return; // not addressed to us
 
+    size_t total_len = ntohs(header->total_length);
+    if (total_len < sizeof(ipv4_header_t) || total_len > len)
+        return; // too small to fit header, or total_len too big
+
     const void *payload = (const uint8_t *)buffer + sizeof(ipv4_header_t);
-    size_t payload_len = len - sizeof(ipv4_header_t);
+    size_t payload_len = total_len - sizeof(ipv4_header_t);
 
     switch (header->protocol) {
         case IPV4_PROTO_UDP:

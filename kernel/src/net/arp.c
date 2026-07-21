@@ -25,10 +25,10 @@ static arp_entry_t arp_table[ARP_TABLE_SIZE];
 static const uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 #define HTYPE_ETHERNET 1
-#define PTYPE_IPV4     0x0800
+#define PTYPE_IPV4 0x0800
 
 #define OP_REQUEST 1
-#define OP_REPLY   2
+#define OP_REPLY 2
 
 typedef struct {
     uint16_t htype;  // hardware type: 1 = ethernet
@@ -124,6 +124,7 @@ void arp_process(net_device_t *dev, const void *buffer, size_t len) {
     }
 }
 
+// TODO currently deadlocks. i should either drop the packet, or i should add it to a queue
 int arp_ask(net_device_t *dev, uint32_t ip, uint8_t mac_out[6]) {
     // already known; no need to ask again
     for (int i=0; i<ARP_TABLE_SIZE; i++) {
@@ -134,14 +135,14 @@ int arp_ask(net_device_t *dev, uint32_t ip, uint8_t mac_out[6]) {
     }
 
     // find a free slot to wait in
-    int slot = -1;
+    int slot=-1;
     for (int i=0; i<ARP_TABLE_SIZE; i++) {
         if (arp_table[i].state==EMPTY) {
-            slot = i;
+            slot=i;
             break;
         }
     }
-    if (slot == -1) return -1; // table full; TODO dynamically sizing hashmap or something of that sort
+    if (slot==-1) return -1; // table full; TODO dynamically sizing hashmap or something of that sort
 
     arp_table[slot].ip = ip;
     arp_table[slot].state = WAITING;

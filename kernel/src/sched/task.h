@@ -33,6 +33,11 @@ typedef struct {
     thread_control_block_t *last_waiting_task;
 } SEMAPHORE;
 
+typedef struct {
+    thread_control_block_t *first_waiting_task;
+    thread_control_block_t *last_waiting_task;
+} CONDVAR;
+
 void sched_init(void);
 thread_control_block_t *task_create(void (*entry)(void));
 void context_switch(thread_control_block_t *next);

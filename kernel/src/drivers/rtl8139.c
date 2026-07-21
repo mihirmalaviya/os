@@ -63,7 +63,7 @@ static void rtl8139_reset(uint16_t io_base) {
 // block (eth_process -> arp reply -> rtl8139_send can wait on tx_sem).
 static void rx_drainer(void) {
     for (;;) {
-        semaphore_acquire(&rx_ready);       // sleeps until the irq enqueues a frame
+        semaphore_acquire(&rx_ready); // sleeps until the irq enqueues a frame
         uint8_t *buf = rxq[rxq_out % RXQ_N].buf;
         uint16_t len = rxq[rxq_out % RXQ_N].len;
         rxq_out++;
@@ -208,7 +208,8 @@ void rtl8139_irq_handler(void *ctx) {
             rx_prefix_t *prefix = (rx_prefix_t *)frame; // first 2 bytes is status, next 2 bytes is len
 
             if (prefix->status & 0x01) { // frame arrived intact
-                uint16_t len = prefix->len - 4; // drop the 4-byte status/len prefix
+                if (prefix->len<4) prefix->len=4;
+                uint16_t len = prefix->len-4; // drop the 4-byte status/len prefix
                 uint8_t *buf = pool_alloc();
                 if (buf!=NULL && len<=POOL_SIZE && (rxq_in-rxq_out)<RXQ_N) {
                     memcpy(buf, frame+4, len);
@@ -223,7 +224,7 @@ void rtl8139_irq_handler(void *ctx) {
 
             rx_offset = (rx_offset + 4+prefix->len +3)&~3; // prefix+frame, round to next multiple of 4
             rx_offset %= 8192;
-            outw(io_base + 0x38, rx_offset - 16);
+            outw(io_base+0x38, rx_offset-16);
         }
         // kprintf("RTL8139: Recieved Packet\n");
     }

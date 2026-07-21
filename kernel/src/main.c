@@ -23,6 +23,8 @@
 #include "drivers/rtl8139.h"
 #include "net/eth.h"
 #include "net/tcp.h"
+#include "net/socket.h"
+#include "net/http.h"
 #include "lib/string.h"
 
 char *fb;
@@ -35,6 +37,49 @@ void task_b_fn(void) {
     unlock_scheduler();
     for (;;) {
         b_counter++;
+    }
+}
+
+void tcp_recv_task(void) {
+    unlock_scheduler();
+
+    int srv = socket();
+    if (bind(srv, 80)<0)
+        kprintf("no space to listen to port 80\n");
+
+    listen(srv);
+
+    for (;;) {
+        int c = accept(srv); // wait for one connection
+
+        char buf[1024];
+        int n;
+        while ((n = read(c, buf, sizeof buf)) > 0) {
+            for (int i=0; i<n; i++)
+                kprintf("%c", buf[i]); // print what we got
+            write(c, buf, n); // echo it back
+        }
+        // read returned 0
+        close(c); // peer closed
+
+        kprintf("\ntcp: connection done\n");
+    }
+}
+
+void curl_task(void) {
+    unlock_scheduler();
+
+    char buf[2048];
+    // example.com = 172.66.147.243
+    int n = http_get(0xAC4293F3, 80, "example.com", "/", buf, sizeof buf - 1);
+    if (n<0) {
+        kprintf("curl: failed\n");
+        return;
+    }
+    buf[n] = '\0';
+    kprintf("curl got %d bytes:\n%s\n", n, buf);
+    for (;;){
+        asm ("hlt");
     }
 }
 
@@ -95,6 +140,7 @@ void kmain(void) {
     pmm_init();
     vmm_init();
     heap_init();
+    terminal_init();   // allocate the terminal line ring buffer (needs the heap)
     vfs_init();
 
     kprintf("hello kernel world!\n");
@@ -102,10 +148,12 @@ void kmain(void) {
     pci_scan();
     // pci_print_devices();
     rtl8139_init(pci_find_device(2, 0));
-    tcp_listen(rtl8139_netdev(), 80);
 
     sched_init();
     task_create(task_b_fn);
+    task_create(tcp_recv_task);
+    task_create(curl_task);
+    // task_create(tcp_timer_task);
 
     sti();
 

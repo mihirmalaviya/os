@@ -22,7 +22,6 @@ typedef struct fs_operations_t {
 
 } fs_operations_t;
 
-
 #define MAX_MOUNTPOINTS 12
 
 typedef struct mountpoint_t {
@@ -58,6 +57,10 @@ typedef struct {
 int open(const char *path, int flags);
 int close(int fd);
 int64_t read(int fd, void *buf, uint32_t nbyte);
+int64_t write(int fd, const void *buf, uint32_t nbyte);
+
+int vfs_install_fd(mountpoint_t *mp, int fs_file_id);
+int vfs_fs_id(int fd);
 
 int opendir(const char *path);
 int closedir(int fd);
