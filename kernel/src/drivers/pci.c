@@ -135,6 +135,7 @@ pci_device_t *pci_find_device(uint8_t class_code, uint8_t subclass) {
 void pci_enable_bus_mastering(pci_device_t *dev) {
     uint32_t cmd = pci_config_read(dev->bus, dev->device, dev->function, 0x04);
     cmd |= (1 << 2); // bus master
+    cmd |= (1 << 1); // memory space, an mmio bar is dead without it
     cmd |= (1 << 0); // io space
     pci_config_write(dev->bus, dev->device, dev->function, 0x04, cmd);
 }

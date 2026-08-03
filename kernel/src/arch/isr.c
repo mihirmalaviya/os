@@ -5,7 +5,7 @@
 static void divide_by_zero_handler(void *ctx) {
     interrupt_frame_t *frame = (interrupt_frame_t *)ctx;
 
-    kprintf("divide by zero at RIP: %llx\n", frame->rip);
+    kprintf("divide by zero at RIP: %lx\n", frame->rip);
     for (;;) asm ("hlt");
 }
 
@@ -15,9 +15,9 @@ static void page_fault_handler(void *ctx) {
     __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
 
     kprintf("PAGE FAULT\n");
-    kprintf("  addr (cr2) = %llx\n", cr2);
-    kprintf("  rip        = %llx\n", frame->rip);
-    kprintf("  error_code = %llx\n", frame->error_code);
+    kprintf("  addr (cr2) = %lx\n", cr2);
+    kprintf("  rip        = %lx\n", frame->rip);
+    kprintf("  error_code = %lx\n", frame->error_code);
     kprintf("  %s, %s, %s\n",
             (frame->error_code & 1) ? "protection" : "not-present",
             (frame->error_code & 2) ? "write" : "read",

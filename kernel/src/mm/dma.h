@@ -1,6 +1,12 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include "mm/pmm.h"
+
+// any hhdm-mapped virtual address back to its physical address. a property of
+// the mapping, not of any one buffer, so it works on a pointer into the middle
+// of one too.
+#define KPHYS(v) ((uint64_t)(v) - pmm_hhdm_offset)
 
 typedef struct {
     uint64_t phys;

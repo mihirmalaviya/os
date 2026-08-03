@@ -1,5 +1,6 @@
 #include "terminal.h"
 #include "string.h"
+#include "drivers/e9.h"
 #include "mm/heap.h"
 #include <stdarg.h>
 #include <nanoprintf.h>
@@ -111,24 +112,54 @@ void terminal_clear(void) {
     cursor_y = 0;
 }
 
-#define KPRINTF_BUF_SIZE 1024
+#define PRINTF_BUF_SIZE 1024
 
-void kprintf(const char *fmt, ...) {
-    char buf[KPRINTF_BUF_SIZE];
-    va_list args;
+int kprintf_to(void (*putc_fn)(char), const char *fmt, va_list args) {
+    char buf[PRINTF_BUF_SIZE];
 
-    va_start(args, fmt);
     int len = npf_vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
 
     if (len < 0) {
-        return;
+        return -1;
     }
     if (len >= (int)sizeof(buf)) {
         len = sizeof(buf) - 1; // npf_vsnprintf already truncated + null-terminated buf for us
     }
 
     for (int i = 0; i < len; i++) {
-        print_char(buf[i]);
+        putc_fn(buf[i]);
     }
+    return len;
+}
+
+static void print_char_both(char c) {
+    e9_putc(c);
+    print_char(c);
+}
+
+// framebuffer only
+void kprintf(const char *fmt, ...) {
+    va_list args;
+
+    va_start(args, fmt);
+    kprintf_to(print_char, fmt, args);
+    va_end(args);
+}
+
+// qemu debugcon only - fast, and captured to a file
+void debugf(const char *fmt, ...) {
+    va_list args;
+
+    va_start(args, fmt);
+    kprintf_to(e9_putc, fmt, args);
+    va_end(args);
+}
+
+// both sinks
+void mprintf(const char *fmt, ...) {
+    va_list args;
+
+    va_start(args, fmt);
+    kprintf_to(print_char_both, fmt, args);
+    va_end(args);
 }

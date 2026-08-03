@@ -30,6 +30,10 @@ uint64_t get_time_since_boot(void) {
     return timer_ticks * ns_per_tick;
 }
 
+uint64_t now_ms(void) {
+    return timer_ticks;
+}
+
 void sleep_ticks(uint64_t ticks) {
     uint64_t target = timer_ticks + ticks;
     while (timer_ticks < target) {

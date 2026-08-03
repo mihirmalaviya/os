@@ -1,40 +1,30 @@
 #include "net/pool.h"
 #include "arch/irq.h"
-#include <stdint.h>
-#include <stddef.h>
 
-typedef struct pool_node {
-    struct pool_node *next;
-} pool_node_t;
+void pool_init(pool_t *p, void *mem, size_t size, uint32_t num) {
+    p->head = NULL;
 
-static uint8_t      pool_mem[POOL_NUM*POOL_SIZE];
-static pool_node_t *head;
-
-void pool_init(void) {
-    head = NULL;
-    for (int i=0; i<POOL_NUM; i++) {
-        pool_node_t *e = (pool_node_t *)(pool_mem + i*POOL_SIZE);
-        e->next = head;
-        head = e;
+    uint8_t *pool_mem = mem;
+    for (uint32_t i=num; i>0; i--) {
+        pool_node_t *e = (pool_node_t *)(pool_mem + (i-1)*size);
+        e->next = p->head;
+        p->head = e;
     }
 }
 
-void *pool_alloc(void) {
+void *pool_alloc(pool_t *p) {
     uint64_t flags = irq_save();
-    pool_node_t *e = head; // pop the head
-    if (e!=NULL) {
-        head = e->next;
-    }
+    pool_node_t *e = p->head; // pop the head
+    if (e!=NULL)
+        p->head = e->next;
     irq_restore(flags);
     return e; // NULL if the pool was empty
 }
 
-void pool_free(void *p) {
-    if (p==NULL) return;
-    pool_node_t *e = (pool_node_t *)p;
-
+void pool_free(pool_t *p, void *e) {
+    pool_node_t *n = e;
     uint64_t flags = irq_save();
-    e->next = head;
-    head = e;
+    n->next = p->head;
+    p->head = n;
     irq_restore(flags);
 }

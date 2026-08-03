@@ -50,13 +50,34 @@ void vmm_map(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) {
 
     // this should never happen if the code is working correctly
     if (pt[pt_i] & VMM_PRESENT) {
-        kprintf("vmm: remapping already-present page at %llx\n", virt);
+        kprintf("vmm: remapping already-present page at %lx\n", virt);
         hcf();
     }
 
     // kprintf("heres whats in this pt entry: %x\n", pt[pt_i]);
 
     pt[pt_i] = phys | flags;
+}
+
+// free space between the hhdm and the kernel, nothing else allocates from it
+#define MMIO_BASE 0xffff900000000000ULL
+
+static uint64_t mmio_next = MMIO_BASE;
+
+void *vmm_map_mmio(uint64_t phys, uint64_t size) {
+    if (size & (PAGE_SIZE-1)) {
+        kprintf("vmm: mmio region of %lx bytes is not a whole number of pages\n", size);
+        hcf();
+    }
+
+    uint64_t *pml4 = vmm_get_current_pml4();
+    void *out = (void *)mmio_next;
+
+    for (uint64_t i=0; i<size; i+=PAGE_SIZE)
+        vmm_map(pml4, mmio_next+i, phys+i, VMM_PRESENT | VMM_WRITABLE | VMM_NOCACHE);
+
+    mmio_next += size;
+    return out;
 }
 
 void vmm_unmap(uint64_t *pml4, uint64_t virt) {

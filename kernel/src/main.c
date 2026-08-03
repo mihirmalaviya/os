@@ -20,11 +20,12 @@
 #include "drivers/ata.h"
 #include "drivers/pci.h"
 #include "drivers/keyboard.h"
-#include "drivers/rtl8139.h"
+// #include "drivers/rtl8139.h"
+#include "drivers/e1000.h"
+#include "net/block.h"
 #include "net/eth.h"
+#include "net/timer.h"
 #include "net/tcp.h"
-#include "net/socket.h"
-#include "net/http.h"
 #include "lib/string.h"
 
 char *fb;
@@ -40,48 +41,48 @@ void task_b_fn(void) {
     }
 }
 
-void tcp_recv_task(void) {
-    unlock_scheduler();
+// void tcp_recv_task(void) {
+//     unlock_scheduler();
+//
+//     int srv = socket();
+//     if (bind(srv, 80)<0)
+//         kprintf("no space to listen to port 80\n");
+//
+//     listen(srv);
+//
+//     for (;;) {
+//         int c = accept(srv); // wait for one connection
+//
+//         char buf[1024];
+//         int n;
+//         while ((n = read(c, buf, sizeof buf)) > 0) {
+//             for (int i=0; i<n; i++)
+//                 kprintf("%c", buf[i]); // print what we got
+//             write(c, buf, n); // echo it back
+//         }
+//         // read returned 0
+//         close(c); // peer closed
+//
+//         kprintf("\ntcp: connection done\n");
+//     }
+// }
 
-    int srv = socket();
-    if (bind(srv, 80)<0)
-        kprintf("no space to listen to port 80\n");
-
-    listen(srv);
-
-    for (;;) {
-        int c = accept(srv); // wait for one connection
-
-        char buf[1024];
-        int n;
-        while ((n = read(c, buf, sizeof buf)) > 0) {
-            for (int i=0; i<n; i++)
-                kprintf("%c", buf[i]); // print what we got
-            write(c, buf, n); // echo it back
-        }
-        // read returned 0
-        close(c); // peer closed
-
-        kprintf("\ntcp: connection done\n");
-    }
-}
-
-void curl_task(void) {
-    unlock_scheduler();
-
-    char buf[2048];
-    // example.com = 172.66.147.243
-    int n = http_get(0xAC4293F3, 80, "example.com", "/", buf, sizeof buf - 1);
-    if (n<0) {
-        kprintf("curl: failed\n");
-        return;
-    }
-    buf[n] = '\0';
-    kprintf("curl got %d bytes:\n%s\n", n, buf);
-    for (;;){
-        asm ("hlt");
-    }
-}
+// void curl_task(void) {
+//     unlock_scheduler();
+//
+//     char buf[2048];
+//     // example.com = 172.66.147.243
+//     int n = http_get(0xAC4293F3, 80, "example.com", "/", buf, sizeof buf - 1);
+//     if (n<0) {
+//         kprintf("curl: failed\n");
+//         return;
+//     }
+//     buf[n] = '\0';
+//     kprintf("curl got %d bytes:\n%s\n", n, buf);
+//     for (;;){
+//         asm ("hlt");
+//     }
+// }
 
 // Set the base revision to 6, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
@@ -114,6 +115,9 @@ static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARK
 // If renaming kmain() to something else, make sure to change the
 // linker script accordingly.
 void kmain(void) {
+    // 0xE9 needs no init, so this works before the framebuffer or heap exist
+    debugf("=== kernel boot ===\n");
+
     // Ensure the bootloader actually understands our base revision (see spec).
     if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
         panic("unsupported limine base revision");
@@ -142,18 +146,22 @@ void kmain(void) {
     heap_init();
     terminal_init();   // allocate the terminal line ring buffer (needs the heap)
     vfs_init();
+    block_init();      // network buffer pool, needs the pmm for its dma pages
 
     kprintf("hello kernel world!\n");
 
     pci_scan();
     // pci_print_devices();
-    rtl8139_init(pci_find_device(2, 0));
+    // rtl8139_init(pci_find_device(2, 0)); // one nic at a time, see the qemu flags in the run target
+    e1000_init(pci_find_device(2, 0));
+    timer_init();
+    tcp_init();
 
     sched_init();
     task_create(task_b_fn);
-    task_create(tcp_recv_task);
-    task_create(curl_task);
-    // task_create(tcp_timer_task);
+
+    // task_create(tcp_recv_task);
+    // task_create(curl_task);
 
     sti();
 

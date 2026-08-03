@@ -6,6 +6,7 @@
 #include "arch/pic.h"
 #include "arch/irq.h"
 #include "terminal/terminal.h"
+#include "net/timer.h"
 
 thread_control_block_t *current_tcb;
 thread_control_block_t *idle_task;
@@ -65,8 +66,8 @@ void check_postponed_switch(void) {
 #define TASK_STACK_SIZE (16 * 1024)
 #define TIME_SLICE_LENGTH 50000000   // 50000000 nanoseconds is 50 ms
 
-thread_control_block_t *first_ready_task;
-thread_control_block_t *last_ready_task;
+static thread_control_block_t *ready_head[NPRIO];
+static thread_control_block_t *ready_tail[NPRIO];
 
 thread_control_block_t *first_sleeping_task;
 
@@ -95,12 +96,41 @@ static void print_task_list(thread_control_block_t *head) {
 
 void print_tasks(void) {
     // kprintf("task %d: %s (current)\n", (int)current_tcb->task_id, tcb_state_name(current_tcb->state));
-    print_task_list(first_ready_task);
+    for (int p = NPRIO - 1; p >= 0; p--)
+        print_task_list(ready_head[p]);
     print_task_list(first_sleeping_task);
     print_task_list(first_terminated_task);
 }
 
-thread_control_block_t *task_create(void (*entry)(void)) {
+static void ready_push(thread_control_block_t *t) {
+    if (t->priority == PRIO_IDLE) // idle is the fallback for when nothing is ready, never queued
+        return;
+
+    int p=t->priority;
+    t->next=NULL;
+    if (ready_tail[p]==NULL){
+        ready_head[p]=t;
+        ready_tail[p]=t;
+    } else {
+        ready_tail[p]->next=t;
+        ready_tail[p]=t;
+    }
+}
+
+static thread_control_block_t *ready_pop(void) {
+    for (int p=NPRIO-1; p>=0; p--) {
+        thread_control_block_t *t = ready_head[p];
+        if (t!=NULL) {
+            ready_head[p] = t->next;
+            if (ready_head[p]==NULL)
+                ready_tail[p]=NULL;
+            return t;
+        }
+    }
+    return NULL;
+}
+
+thread_control_block_t *task_create_prio(void (*entry)(void), int priority) {
     thread_control_block_t *tcb = kmalloc(sizeof(thread_control_block_t)); // pointer to tcb in heap
     uint8_t *stack = kmalloc(TASK_STACK_SIZE); // pointer to stack in heap
     uint64_t *sp = (uint64_t *)(stack + TASK_STACK_SIZE) - 7; // -7 because we about to allocate 7 thingys
@@ -120,60 +150,74 @@ thread_control_block_t *task_create(void (*entry)(void)) {
     tcb->time_slice_length = TIME_SLICE_LENGTH;
     tcb->irq_disable_counter = 1;
     tcb->task_id = next_task_id++;
+    tcb->priority = priority;
     // tcb->next = current_tcb->next;
     // current_tcb->next = tcb;
 
-    if (last_ready_task == NULL) {
-        first_ready_task = tcb;
-        last_ready_task  = tcb;
-    } else {
-        last_ready_task->next = tcb;
-        last_ready_task = tcb;
-    }
+    ready_push(tcb);
 
     return tcb;
 }
 
+thread_control_block_t *task_create(void (*entry)(void)) {
+    return task_create_prio(entry, PRIO_LOW);
+}
 
-void schedule() {
-    if (postpone_task_switches_counter != 0) {
-        task_switches_postponed_flag = 1;
+
+// void schedule() {
+//     if (postpone_task_switches_counter != 0) {
+//         task_switches_postponed_flag = 1;
+//         return;
+//     }
+//     if (first_ready_task != NULL) {
+//         thread_control_block_t *task = first_ready_task;
+//         first_ready_task = task->next;
+//         if (first_ready_task == NULL) last_ready_task = NULL;
+//
+//         if (task == idle_task) {
+//             // Try to find an alternative to prevent the idle task getting CPU time
+//             if (first_ready_task != NULL) {
+//                 // Idle task was selected but other tasks are "ready to run"
+//                 task = first_ready_task;
+//                 first_ready_task = task->next;
+//                 if (first_ready_task == NULL) last_ready_task = NULL;
+//
+//                 idle_task->next = NULL;
+//                 if (last_ready_task == NULL) {
+//                     first_ready_task = idle_task;
+//                     last_ready_task  = idle_task;
+//                 } else {
+//                     last_ready_task->next = idle_task;
+//                     last_ready_task = idle_task;
+//                 }
+//             } else if (current_tcb->state == TCB_RUNNING) {
+//                 // No other tasks ready to run, but the currently running task wasn't blocked and can keep running
+//                 first_ready_task = idle_task;
+//                 last_ready_task  = idle_task;
+//                 idle_task->next  = NULL;
+//                 return;
+//             } else {
+//                 // No other options - the idle task is the only task that can be given CPU time
+//             }
+//         }
+//         switch_to_task(task);
+//     }
+// }
+
+void schedule(void) {
+    if (postpone_task_switches_counter!=0) {
+        task_switches_postponed_flag=1;
         return;
     }
-    if (first_ready_task != NULL) {
-        thread_control_block_t *task = first_ready_task;
-        first_ready_task = task->next;
-        if (first_ready_task == NULL) last_ready_task = NULL;
-
-        if (task == idle_task) {
-            // Try to find an alternative to prevent the idle task getting CPU time
-            if (first_ready_task != NULL) {
-                // Idle task was selected but other tasks are "ready to run"
-                task = first_ready_task;
-                first_ready_task = task->next;
-                if (first_ready_task == NULL) last_ready_task = NULL;
-
-                idle_task->next = NULL;
-                if (last_ready_task == NULL) {
-                    first_ready_task = idle_task;
-                    last_ready_task  = idle_task;
-                } else {
-                    last_ready_task->next = idle_task;
-                    last_ready_task = idle_task;
-                }
-            } else if (current_tcb->state == TCB_RUNNING) {
-                // No other tasks ready to run, but the currently running task wasn't blocked and can keep running
-                first_ready_task = idle_task;
-                last_ready_task  = idle_task;
-                idle_task->next  = NULL;
-                return;
-            } else {
-                // No other options - the idle task is the only task that can be given CPU time
-            }
-        }
-        switch_to_task(task);
+    thread_control_block_t *task = ready_pop();
+    if (task==NULL){ // nothing is ready
+        if (current_tcb->state==TCB_RUNNING)
+            return;
+        task = idle_task;
     }
+    switch_to_task(task);
 }
+
 
 uint64_t time_slice_remaining = 0;
 
@@ -187,14 +231,7 @@ void switch_to_task(thread_control_block_t *next) {
 
     if (current_tcb->state == TCB_RUNNING) { // if it isnt running dont add it back to the queue
         current_tcb->state = TCB_READY;
-        current_tcb->next = NULL;
-        if (last_ready_task == NULL) { // if there are no other tasks
-            first_ready_task = current_tcb;
-            last_ready_task  = current_tcb;
-        } else {
-            last_ready_task->next = current_tcb;
-            last_ready_task = current_tcb;
-        }
+        ready_push(current_tcb);
     }
 
     time_slice_remaining = (next == idle_task) ? 0 : next->time_slice_length;
@@ -212,17 +249,13 @@ void block_task(int reason) {
 
 // raw
 static void __unblock_task(thread_control_block_t *task) {
-    task->state = TCB_READY;
-    task->next  = NULL;
-    if (last_ready_task == NULL) {
-        first_ready_task = task;
-        last_ready_task  = task;
-    } else {
-        last_ready_task->next = task;
-        last_ready_task = task;
-    }
+    if (task->state == TCB_READY || task->state == TCB_RUNNING)
+        return;
 
-    if (current_tcb == idle_task) {
+    task->state = TCB_READY;
+    ready_push(task);
+
+    if (task->priority > current_tcb->priority) {
         schedule();
     }
 }
@@ -231,6 +264,12 @@ void unblock_task(thread_control_block_t *task) {
     lock_scheduler();
     __unblock_task(task);
     unlock_scheduler();
+}
+
+// same as unblock_task, but for callers already running with interrupts off
+// (an irq handler) where taking lock_scheduler's cli again would be wrong
+void unblock_task_from_irq(thread_control_block_t *task) {
+    __unblock_task(task);
 }
 
 
@@ -244,6 +283,7 @@ void PIT_IRQ_handler(void *ctx) {
     postpone_switches();
 
     pit_tick();
+    timer_wheel_tick();
     current_tcb->ticks_used++;
 
     // Move everything from the sleeping task list into a temporary variable and make the sleeping task list empty
@@ -394,6 +434,40 @@ void release_mutex(SEMAPHORE *semaphore) {
     semaphore_release(semaphore);
 }
 
+// caller must hold semaphore
+void waitq_wait(waitq_t *waitq, SEMAPHORE *semaphore) {
+    lock_stuff();
+
+    current_tcb->next = NULL;
+    if(waitq->first_waiting_task == NULL){
+        waitq->first_waiting_task = current_tcb;
+    }else{
+        waitq->last_waiting_task->next = current_tcb;
+    }
+    waitq->last_waiting_task = current_tcb;
+
+    semaphore_release(semaphore);
+    block_task(TCB_BLOCKED);
+
+    unlock_stuff();
+
+
+    acquire_mutex(semaphore);
+}
+
+void waitq_broadcast(waitq_t *waitq) {
+    lock_stuff();
+
+    while(waitq->first_waiting_task != NULL) {
+        thread_control_block_t *task = waitq->first_waiting_task;
+        waitq->first_waiting_task = task->next;
+        unblock_task(task);
+    }
+    waitq->last_waiting_task = NULL;
+
+    unlock_stuff();
+}
+
 thread_control_block_t *cleaner_task_tcb;
 
 void cleanup_terminated_task(thread_control_block_t *task) {
@@ -429,16 +503,17 @@ void kernel_idle_task(void) {
 
 void sched_init(void) {
     thread_control_block_t *boot = kmalloc(sizeof(thread_control_block_t));
-    boot->cr3   = read_cr3();
-    boot->rsp0  = *tss_rsp0_ptr;
+    boot->cr3 = read_cr3();
+    boot->rsp0 = *tss_rsp0_ptr;
     boot->state = TCB_RUNNING;
     boot->time_slice_length = TIME_SLICE_LENGTH;
     boot->irq_disable_counter = 0;
     boot->task_id = next_task_id++;
-    boot->next  = boot;
+    boot->priority = PRIO_LOW;
+    boot->next = boot;
     current_tcb = boot;
     time_slice_remaining = boot->time_slice_length;
-    idle_task = task_create(kernel_idle_task);
+    idle_task = task_create_prio(kernel_idle_task, PRIO_IDLE);
     cleaner_task_tcb = task_create(cleaner_task);
 }
 

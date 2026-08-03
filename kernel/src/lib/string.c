@@ -8,14 +8,17 @@
 // DO NOT remove or rename these functions, or stuff will eventually break!
 
 void *memcpy(void *restrict dest, const void *restrict src, size_t n) {
-    uint8_t *restrict pdest = dest;
-    const uint8_t *restrict psrc = src;
+    void *ret = dest;
 
-    for (size_t i = 0; i < n; i++) {
-        pdest[i] = psrc[i];
-    }
+    asm volatile (
+        "cld\n\t"
+        "rep movsb"
+        : "+D"(dest), "+S"(src), "+c"(n)
+        :
+        : "memory"
+    );
 
-    return dest;
+    return ret;
 }
 
 void *memset(void *s, int c, size_t n) {

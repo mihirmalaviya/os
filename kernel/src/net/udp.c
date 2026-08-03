@@ -1,6 +1,6 @@
 #include "net/udp.h"
 #include "net/ipv4.h"
-#include "net/pkt.h"
+#include "net/block.h"
 #include "net/byteorder.h"
 #include "sched/task.h"
 #include "lib/string.h"
@@ -117,19 +117,18 @@ void udp_process(const void *buffer, size_t len, uint32_t src_ip) {
 int udp_send(net_device_t *dev, uint32_t dst_ip, uint16_t dst_port, uint16_t src_port, const void *payload, size_t len) {
     if (len>UDP_MAX_PAYLOAD) return -1;
 
-    uint8_t p_buf[PBUF_HEADROOM + sizeof(udp_header_t) + UDP_MAX_PAYLOAD];
-    pbuf_t p;
-    pbuf_init(&p, p_buf, PBUF_HEADROOM + len, PBUF_HEADROOM); // sz = payload only; header prepended below
+    block_t *b = block_alloc(len, HDR_UDP);
+    if (b==NULL) return -1;
+    block_put(b, len);
+    memcpy(b->data, payload, len);
 
-    memcpy(p.data, payload, len);
-
-    udp_header_t *header = (udp_header_t *)pbuf_add_header(&p, sizeof(udp_header_t));
+    udp_header_t *header = (udp_header_t *)block_push(b, sizeof(udp_header_t));
     header->src_port = htons(src_port);
     header->dst_port = htons(dst_port);
     header->length = htons(sizeof(udp_header_t)+len);
     header->checksum = 0;
 
-    return ipv4_send(dev, dst_ip, IPV4_PROTO_UDP, &p);
+    return ipv4_send(dev, dst_ip, IPV4_PROTO_UDP, b);
 }
 
 int udp_recv(uint16_t port, uint32_t *src_ip, uint16_t *src_port, void *buf, size_t buflen) {

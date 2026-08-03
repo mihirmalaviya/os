@@ -11,6 +11,11 @@ typedef enum {
     TCB_TERMINATED,
 } tcb_state_t;
 
+#define NPRIO      2
+#define PRIO_IDLE  (-1)     /* idle only; never in a ready queue */
+#define PRIO_LOW   0
+#define PRIO_HIGH  1
+
 typedef struct thread_control_block {
     uint64_t rsp;      // saved kernel stack pointer (switch_to_task reads/writes this)
     uint64_t rsp0;     // top of this task's kernel stack (loaded into TSS.rsp0 on switch)
@@ -22,6 +27,7 @@ typedef struct thread_control_block {
     uint64_t sleep_expiry;
     uint64_t time_slice_length; // ns of CPU time this task gets before forced preemption
     int irq_disable_counter; // nesting depth of this task's own lock_scheduler()/lock_stuff() calls
+    int priority;
 } thread_control_block_t;
 
 extern thread_control_block_t *current_tcb;
@@ -36,10 +42,11 @@ typedef struct {
 typedef struct {
     thread_control_block_t *first_waiting_task;
     thread_control_block_t *last_waiting_task;
-} CONDVAR;
+} waitq_t;
 
 void sched_init(void);
 thread_control_block_t *task_create(void (*entry)(void));
+thread_control_block_t *task_create_prio(void (*entry)(void), int priority);
 void context_switch(thread_control_block_t *next);
 
 // caller must hold the scheduler lock (lock_scheduler()) before calling
@@ -55,6 +62,7 @@ void unlock_stuff(void);
 
 void block_task(int reason);
 void unblock_task(thread_control_block_t *task);
+void unblock_task_from_irq(thread_control_block_t *task); // wake a task from an irq handler
 
 void PIT_IRQ_handler(void *ctx);
 void check_postponed_switch(void);
@@ -75,3 +83,10 @@ void release_mutex(SEMAPHORE *semaphore);
 
 void postpone_switches(void);
 void unpostpone_switches(void);
+
+// caller must already hold semaphore
+void waitq_wait(waitq_t *waitq, SEMAPHORE *semaphore);
+
+// caller must already hold semaphore; wakes every waiter
+void waitq_broadcast(waitq_t *waitq);
+

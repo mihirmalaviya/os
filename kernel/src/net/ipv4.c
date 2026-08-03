@@ -1,5 +1,4 @@
 #include "net/ipv4.h"
-#include "net/eth.h"
 #include "net/arp.h"
 #include "net/udp.h"
 #include "net/tcp.h"
@@ -21,47 +20,60 @@ typedef struct {
     uint32_t dst_ip;
 } __attribute__((packed)) ipv4_header_t;
 
-void ipv4_process(net_device_t *dev, const void *buffer, size_t len) {
-    if (len < sizeof(ipv4_header_t)) return;
-    const ipv4_header_t *header = (const ipv4_header_t *)buffer;
+void ipv4_process(net_device_t *dev, block_t *b) {
+    if (block_len(b) < sizeof(ipv4_header_t)) { block_free(b); return; }
+    const ipv4_header_t *header = (const ipv4_header_t *)b->data;
 
-    if (checksum(header, sizeof(ipv4_header_t)) != 0)
+    if (checksum(header, sizeof(ipv4_header_t)) != 0) {
+        block_free(b);
         return; // corrupted header
+    }
 
-    if (ntohs(header->flags_frag) & 0x3FFF) // TODO
+    if (ntohs(header->flags_frag) & 0x3FFF) { // TODO
+        block_free(b);
         return; // fragmented
+    }
 
-    if (ntohl(header->dst_ip) != dev->ip)
+    if (ntohl(header->dst_ip) != dev->ip) {
+        block_free(b);
         return; // not addressed to us
+    }
 
     size_t total_len = ntohs(header->total_length);
-    if (total_len < sizeof(ipv4_header_t) || total_len > len)
+    if (total_len < sizeof(ipv4_header_t) || total_len > block_len(b)) {
+        block_free(b);
         return; // too small to fit header, or total_len too big
+    }
 
-    const void *payload = (const uint8_t *)buffer + sizeof(ipv4_header_t);
     size_t payload_len = total_len - sizeof(ipv4_header_t);
+    block_pull(b, sizeof(ipv4_header_t));
+    block_trim(b, payload_len);
 
     switch (header->protocol) {
         case IPV4_PROTO_UDP:
-            udp_process(payload, payload_len, ntohl(header->src_ip));
+            udp_process(b->data, block_len(b), ntohl(header->src_ip));
+            block_free(b);
             break;
         case IPV4_PROTO_TCP:
-            tcp_process(dev, payload, payload_len, ntohl(header->src_ip));
+            tcp_input(dev, b->data, block_len(b), ntohl(header->src_ip));
+            block_free(b);
             break;
         case IPV4_PROTO_ICMP:
             // TODO: icmp_process(dev, payload, payload_len, ntohl(header->src_ip));
+            block_free(b);
             break;
         default:
             kprintf("ipv4_process: unknown protocol %x, dropped\n", header->protocol);
+            block_free(b);
             break;
     }
 }
 
-int ipv4_send(net_device_t *dev, uint32_t dst_ip, uint8_t protocol, pbuf_t *p) {
-    size_t payload_len = pbuf_len(p); // before we prepend, this is just the payload
+int ipv4_send(net_device_t *dev, uint32_t dst_ip, uint8_t protocol, block_t *b) {
+    size_t payload_len = block_len(b); // before we prepend, this is just the payload
 
     // push our 20 bytes into the reserved headroom, in front of the payload
-    ipv4_header_t *header = (ipv4_header_t *)pbuf_add_header(p, sizeof(ipv4_header_t));
+    ipv4_header_t *header = (ipv4_header_t *)block_push(b, sizeof(ipv4_header_t));
 
     header->version_ihl  = 0x45;          // version 4, header length 5 words
     header->service_type = 0;
@@ -84,11 +96,6 @@ int ipv4_send(net_device_t *dev, uint32_t dst_ip, uint8_t protocol, pbuf_t *p) {
         next_hop = dev->gateway; // no? send to router
     }
 
-    uint8_t dst_mac[6];
-    if (arp_ask(dev, next_hop, dst_mac) != 0) {
-        return -1; // couldnt resolve the next hops mac, give up
-    }
-
-    eth_send(dev, dst_mac, ETHERTYPE_IP, p);
+    arp_resolve(dev, next_hop, b); // sends now if known, else parks until resolved
     return 0;
 }

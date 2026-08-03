@@ -1,7 +1,12 @@
 #pragma once
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
+#include "net/pool.h"
 #include "net/netdev.h"
+#include "net/queue.h"
+#include "lib/hashmap.h"
+
+uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip, const void *segment, size_t len);
 
 typedef struct {
     uint16_t src_port;
@@ -15,16 +20,6 @@ typedef struct {
     uint16_t urgent_ptr;   // offset to end of urgent data
 } __attribute__((packed)) tcp_header_t;
 
-typedef enum {
-    TCP_CLOSED = 0,
-    TCP_LISTEN,
-    TCP_SYN_SENT,
-    TCP_SYN_RECEIVED,
-    TCP_ESTABLISHED,
-    TCP_CLOSE_WAIT,
-    TCP_LAST_ACK,
-} tcp_state_t;
-
 #define FIN 0x01
 #define SYN 0x02
 #define RST 0x04
@@ -34,30 +29,65 @@ typedef enum {
 #define ECE 0x40
 #define CWR 0x80
 
-// opaque connection handle; the full struct lives in tcp.c
-typedef struct tcp_connection tcp_connection_t;
+typedef enum {
+    CLOSED,
+    LISTEN,
+    SYN_SENT,
+    SYN_RECEIVED,
+    ESTABLISHED,
+    FIN_WAIT_1,
+    FIN_WAIT_2,
+    CLOSE_WAIT,
+    CLOSING,
+    LAST_ACK,
+    TIME_WAIT,
+} tcp_state_t;
 
-uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip, const void *segment, size_t len);
+#define SEQ_LT(a,b)  ((int32_t)((a)-(b)) < 0)
+#define SEQ_LEQ(a,b) ((int32_t)((a)-(b)) <= 0)
+#define SEQ_GT(a,b)  ((int32_t)((a)-(b)) > 0)
+#define SEQ_GEQ(a,b) ((int32_t)((a)-(b)) >= 0)
 
-// park a slot in LISTEN on the given port, ready to accept connections
-int tcp_listen(net_device_t *dev, uint16_t port);
+typedef struct {
+    pool_node_t node;
+    tcp_state_t t_state;
 
-// block until a connection completes its handshake on port, return its handle
-tcp_connection_t *tcp_accept(uint16_t port);
+    hnode_t hnode;
+    uint32_t local_ip, remote_ip;
+    uint16_t local_port, remote_port;
 
-// block until data arrives, copy up to len bytes into buf, return count (0 = EOF)
-int tcp_recv(tcp_connection_t *c, void *buf, size_t len);
+    net_device_t *dev;
+    uint32_t iss;
+    uint32_t snd_una, snd_nxt, snd_max, snd_wnd;
+    uint32_t rcv_nxt, irs;
+    uint16_t t_mss;
+    int flgcnt;
+    queue_t sndq;
+} tcpcb_t;
 
-// queue len bytes for sending, return bytes accepted (short write), or -1 if not sendable
-int tcp_send(tcp_connection_t *c, const void *buf, size_t len);
+void tcp_init(void);
+tcpcb_t *tcb_alloc(net_device_t *dev, uint32_t local_ip, uint32_t remote_ip, uint16_t local_port, uint16_t remote_port);
+void tcb_free(tcpcb_t *tcb);
 
-// close our sending side (send FIN); call after the peer has closed (recv returned 0)
-int tcp_close(tcp_connection_t *c);
+void tcb_insert(tcpcb_t *tcb);
+void tcb_remove(tcpcb_t *tcb);
+tcpcb_t *tcb_lookup(uint32_t local_ip, uint32_t remote_ip, uint16_t local_port, uint16_t remote_port);
 
-// actively open a connection from src_port to dst; blocks until established, NULL on failure
-tcp_connection_t *tcp_connect(net_device_t *dev, uint16_t src_port, uint32_t dst_ip, uint16_t dst_port);
+typedef struct {
+    pool_node_t node;
+    hnode_t hnode;
+    uint16_t port;
+} listener_t;
 
-void tcp_process(net_device_t *dev, const void *buffer, size_t len, uint32_t src_ip);
+listener_t *listener_create(uint16_t port); // NULL if already listening or pool empty
+void listener_free(listener_t *l);
 
-// periodically retransmits stuff
-// void tcp_timer_task(void);
+listener_t *listener_lookup(uint16_t port);
+
+int tcp_listen(uint16_t port); // 0 on success, -1 if already listening or pool empty
+
+uint16_t port_alloc(uint32_t local_ip, uint32_t remote_ip, uint16_t remote_port); // 0 on failure
+
+void tcp_output(tcpcb_t *tcb);
+
+void tcp_input(net_device_t *dev, const void *data, size_t len, uint32_t src_ip);

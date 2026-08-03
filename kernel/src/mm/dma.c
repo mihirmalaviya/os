@@ -2,7 +2,7 @@
 #include "mm/pmm.h"
 
 dma_buf_t dma_alloc(size_t pages) {
-    dma_buf_t buf;
+    dma_buf_t buf = { .phys = 0, .virt = NULL };
 
     buf.phys = pmm_alloc_contig(pages);
     if (buf.phys != 0) {
