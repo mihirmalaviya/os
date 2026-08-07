@@ -1,11 +1,13 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef struct timer {
     struct timer *next, *prev;
     uint64_t deadline; // ms
     void (*fired)(struct timer *t); // called on expiry
     uint32_t slot;
+    bool armed; // currently scheduled - lets a caller avoid double-arming
 } timer_t;
 
 // arms t for now+delay_ms

@@ -26,7 +26,7 @@ void block_init(void);
 block_t *block_alloc(uint32_t size, uint32_t headroom); // NULL when the pool is empty
 void block_free(block_t *b);
 
-uint32_t block_len(const block_t *b); // payload bytes
+uint32_t block_len(const block_t *b); // bytes of data
 uint32_t block_room(const block_t *b); // spare room at the tail
 
 uint8_t *block_push(block_t *b, uint32_t n); // prepend n bytes, returns the new data

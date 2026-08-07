@@ -1,12 +1,18 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "net/pool.h"
 #include "net/netdev.h"
 #include "net/queue.h"
+#include "net/timer.h"
+#include "sched/task.h"
 #include "lib/hashmap.h"
 
 uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip, const void *segment, size_t len);
+
+#define TCP_EOF -1 // receive side ended cleanly
+#define ECONNRESET 104 // peer sent RST
 
 typedef struct {
     uint16_t src_port;
@@ -47,10 +53,14 @@ typedef enum {
 #define SEQ_LEQ(a,b) ((int32_t)((a)-(b)) <= 0)
 #define SEQ_GT(a,b)  ((int32_t)((a)-(b)) > 0)
 #define SEQ_GEQ(a,b) ((int32_t)((a)-(b)) >= 0)
+#define SEQ_MAX(a,b) (SEQ_GT((a),(b)) ? (a) : (b))
+#define SEQ_MIN(a,b) (SEQ_LT((a),(b)) ? (a) : (b))
 
-typedef struct {
+typedef struct listener listener_t;
+
+typedef struct tcpcb {
     pool_node_t node;
-    tcp_state_t t_state;
+    tcp_state_t state;
 
     hnode_t hnode;
     uint32_t local_ip, remote_ip;
@@ -60,34 +70,65 @@ typedef struct {
     uint32_t iss;
     uint32_t snd_una, snd_nxt, snd_max, snd_wnd;
     uint32_t rcv_nxt, irs;
-    uint16_t t_mss;
-    int flgcnt;
+    uint16_t mss;
+    int synfin_cnt;
     queue_t sndq;
+    waitq_t writers; // woken when sndq has room (snd_una advances)
+
+    queue_t rcvq;
+    timer_t t_rxt_timer;
+    uint8_t t_rxtcount;
+
+    struct tcpcb *accept_next; // listeners accept queue
+    listener_t *listener;
+
+    waitq_t readers; // woken when data lands in rcvq
+    waitq_t connecting; // woken when state leaves SYN_SENT
+    int error; // 0 = still open. nonzero = receive is over: ECONNRESET or TCP_EOF says why
+
+    SEMAPHORE lock;
 } tcpcb_t;
 
 void tcp_init(void);
 tcpcb_t *tcb_alloc(net_device_t *dev, uint32_t local_ip, uint32_t remote_ip, uint16_t local_port, uint16_t remote_port);
 void tcb_free(tcpcb_t *tcb);
+void tcb_close(tcpcb_t *tcb, int error); // caller must hold tcb->lock
 
 void tcb_insert(tcpcb_t *tcb);
 void tcb_remove(tcpcb_t *tcb);
 tcpcb_t *tcb_lookup(uint32_t local_ip, uint32_t remote_ip, uint16_t local_port, uint16_t remote_port);
 
-typedef struct {
+struct listener {
     pool_node_t node;
     hnode_t hnode;
     uint16_t port;
-} listener_t;
+
+    tcpcb_t *accept_head, *accept_tail;
+    int nqueued;
+    bool closing;
+    int refcount;
+    SEMAPHORE lock;
+    waitq_t accept_waiters;
+};
 
 listener_t *listener_create(uint16_t port); // NULL if already listening or pool empty
-void listener_free(listener_t *l);
+void listener_close(listener_t *l);
 
 listener_t *listener_lookup(uint16_t port);
 
 int tcp_listen(uint16_t port); // 0 on success, -1 if already listening or pool empty
+tcpcb_t *tcp_accept(listener_t *l); // blocks until a connection is ready
 
 uint16_t port_alloc(uint32_t local_ip, uint32_t remote_ip, uint16_t remote_port); // 0 on failure
 
-void tcp_output(tcpcb_t *tcb);
+void tcp_send(tcpcb_t *tcb, const void *data, size_t len);
+int64_t tcp_recv(tcpcb_t *tcb, void *buf, size_t n);
+void tcp_close(tcpcb_t *tcb);
 
-void tcp_input(net_device_t *dev, const void *data, size_t len, uint32_t src_ip);
+tcpcb_t *tcp_connect(net_device_t *dev, uint32_t dst_ip, uint16_t dst_port); // NULL on failure
+
+#define FORCE 0x1 // send even if there's nothing new to say, bypass SWS avoidance
+
+void tcp_output(tcpcb_t *tcb, int flags);
+
+void tcp_input(net_device_t *dev, block_t *b, uint32_t src_ip);

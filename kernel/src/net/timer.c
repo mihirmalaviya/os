@@ -24,8 +24,11 @@ static void pending_push(timer_t *batch) {
         return;
 
     timer_t *tail = batch;
-    while (tail->next!=NULL)
+    tail->armed=false; // off the wheel now, about to fire or get rescheduled
+    while (tail->next!=NULL) {
         tail=tail->next;
+        tail->armed=false;
+    }
 
     if (pending_tail!=NULL)
         pending_tail->next=batch;
@@ -43,8 +46,12 @@ static timer_t *pending_pop(void) {
 }
 
 void timer_arm(timer_t *t, uint64_t delay_ms, void (*fired)(timer_t *t)) {
+    if (t->armed)
+        timer_cancel(t);
+
     t->deadline=now_ms()+delay_ms;
     t->fired=fired;
+    t->armed=true;
 
     uint32_t slot = (uint32_t)((wheel_curr+delay_ms) % WHEEL_SIZE);
     t->slot=slot;
@@ -69,6 +76,8 @@ void timer_cancel(timer_t *t) {
         t->next->prev=t->prev;
 
     irq_restore(flags);
+
+    t->armed=false;
 }
 
 // called from irq context

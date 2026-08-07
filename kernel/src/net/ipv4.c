@@ -55,7 +55,7 @@ void ipv4_process(net_device_t *dev, block_t *b) {
             block_free(b);
             break;
         case IPV4_PROTO_TCP:
-            tcp_input(dev, b->data, block_len(b), ntohl(header->src_ip));
+            tcp_input(dev, b, ntohl(header->src_ip));
             block_free(b);
             break;
         case IPV4_PROTO_ICMP:

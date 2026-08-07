@@ -258,14 +258,12 @@ static void init_tx(void) {
 
 // attaches b directly to the next slot, no copy. reclaims whatever was there
 // before lazily, on the next send that lands on the same slot. never spins:
-// if the slot isnt free yet, drops and returns -1 rather than wait.
-// takes ownership of b either way, same contract as every other dev->send.
 static int send_packet(net_device_t *dev, block_t *b) {
     (void)dev; // only one card right now
 
     lock_stuff();
 
-    if (!(tx[tx_index].status & TXD_STAT_DD)) {
+    if (!(tx[tx_index].status & TXD_STAT_DD)) { // TODO eagerly free
         unlock_stuff();
         block_free(b);
         return -1;
@@ -276,12 +274,12 @@ static int send_packet(net_device_t *dev, block_t *b) {
 
     tx[tx_index].addr   = KPHYS(b->data);
     tx[tx_index].length = block_len(b);
-    tx[tx_index].status = 0; // clear DD ourselves; hardware sets it again on completion
+    tx[tx_index].status = 0; // clear DD
     tx[tx_index].cmd    = TXD_CMD_EOP | TXD_CMD_IFCS | TXD_CMD_RS;
 
     tx_virt[tx_index] = b;
 
-    tx_index = (tx_index + 1) % TX_DESC_N;
+    tx_index = (tx_index+1) % TX_DESC_N;
     write_command(REG_TXDESCTAIL, tx_index);
 
     unlock_stuff();
@@ -313,7 +311,7 @@ void e1000_init(pci_device_t *dev) {
     // words 0..2 of the eeprom hold the mac, low byte first within each word
     for (int i=0; i<3; i++) {
         uint16_t word = eeprom_read(i);
-        mac[i*2]   = (uint8_t)(word & 0xFF);
+        mac[i*2] = (uint8_t)(word & 0xFF);
         mac[i*2+1] = (uint8_t)(word >> 8);
     }
 
