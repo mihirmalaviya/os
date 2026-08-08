@@ -60,6 +60,18 @@ void unlock_scheduler(void);
 void lock_stuff(void);
 void unlock_stuff(void);
 
+static inline void refcount_inc(int *r) {
+    lock_stuff();
+    (*r)++;
+    unlock_stuff();
+}
+
+static inline void refcount_dec(int *r) {
+    lock_stuff();
+    (*r)--;
+    unlock_stuff();
+}
+
 void block_task(int reason);
 void unblock_task(thread_control_block_t *task);
 void unblock_task_from_irq(thread_control_block_t *task); // wake a task from an irq handler

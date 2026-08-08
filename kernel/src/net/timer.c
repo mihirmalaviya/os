@@ -24,10 +24,10 @@ static void pending_push(timer_t *batch) {
         return;
 
     timer_t *tail = batch;
-    tail->armed=false; // off the wheel now, about to fire or get rescheduled
+    tail->state=TIMER_PENDING; // off the wheel now, about to fire or get rescheduled
     while (tail->next!=NULL) {
         tail=tail->next;
-        tail->armed=false;
+        tail->state=TIMER_PENDING;
     }
 
     if (pending_tail!=NULL)
@@ -46,12 +46,11 @@ static timer_t *pending_pop(void) {
 }
 
 void timer_arm(timer_t *t, uint64_t delay_ms, void (*fired)(timer_t *t)) {
-    if (t->armed)
-        timer_cancel(t);
+    timer_cancel(t);
 
     t->deadline=now_ms()+delay_ms;
     t->fired=fired;
-    t->armed=true;
+    t->state=TIMER_ARMED;
 
     uint32_t slot = (uint32_t)((wheel_curr+delay_ms) % WHEEL_SIZE);
     t->slot=slot;
@@ -68,25 +67,28 @@ void timer_arm(timer_t *t, uint64_t delay_ms, void (*fired)(timer_t *t)) {
 void timer_cancel(timer_t *t) {
     uint64_t flags = irq_save();
 
-    if (t->prev!=NULL)
-        t->prev->next=t->next;
-    else
-        wheel[t->slot]=t->next;
-    if (t->next!=NULL)
-        t->next->prev=t->prev;
+    // only unlink if its actually sitting in the wheel
+    if (t->state==TIMER_ARMED) {
+        if (t->prev!=NULL)
+            t->prev->next=t->next;
+        else
+            wheel[t->slot]=t->next;
+        if (t->next!=NULL)
+            t->next->prev=t->prev;
+    }
 
     irq_restore(flags);
 
-    t->armed=false;
+    t->state=TIMER_OFF;
 }
 
 // called from irq context
 void timer_wheel_tick(void) {
     uint64_t flags = irq_save();
 
-    wheel_curr = (wheel_curr+1) % WHEEL_SIZE;
+    wheel_curr = (wheel_curr+1)%WHEEL_SIZE;
     timer_t *curr = wheel[wheel_curr];
-    wheel[wheel_curr]=NULL;
+    wheel[wheel_curr] = NULL;
 
     pending_push(curr);
 
@@ -109,10 +111,12 @@ static void timer_task(void) {
 
         while (curr!=NULL) {
             timer_t *next = curr->next;
-            if (curr->deadline <= now_ms()) {
-                curr->fired(curr); // fire stuff if its time
-            } else {
-                timer_arm(curr, curr->deadline - now_ms(), curr->fired); // reschedule the rest
+            if (curr->state==TIMER_PENDING) {
+                if (curr->deadline <= now_ms()) {
+                    curr->fired(curr); // fire stuff if its time
+                } else {
+                    timer_arm(curr, curr->deadline - now_ms(), curr->fired); // reschedule the rest
+                }
             }
             curr=next;
         }

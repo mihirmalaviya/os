@@ -13,6 +13,7 @@ uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip, const void *segment, siz
 
 #define TCP_EOF -1 // receive side ended cleanly
 #define ECONNRESET 104 // peer sent RST
+#define ETIMEDOUT 110 // retransmit retries exhausted w/o ACK
 
 typedef struct {
     uint16_t src_port;
@@ -78,13 +79,14 @@ typedef struct tcpcb {
     queue_t rcvq;
     timer_t t_rxt_timer;
     uint8_t t_rxtcount;
+    timer_t t_2msl_timer; // FIN_WAIT_2 and TIME_WAIT
 
     struct tcpcb *accept_next; // listeners accept queue
-    listener_t *listener;
 
     waitq_t readers; // woken when data lands in rcvq
     waitq_t connecting; // woken when state leaves SYN_SENT
     int error; // 0 = still open. nonzero = receive is over: ECONNRESET or TCP_EOF says why
+    int refcount; // outstanding interest in this tcb (asleep, or mid-acquire) - recycle gate waits for 0
 
     SEMAPHORE lock;
 } tcpcb_t;
@@ -92,11 +94,14 @@ typedef struct tcpcb {
 void tcp_init(void);
 tcpcb_t *tcb_alloc(net_device_t *dev, uint32_t local_ip, uint32_t remote_ip, uint16_t local_port, uint16_t remote_port);
 void tcb_free(tcpcb_t *tcb);
+bool tcb_try_recycle(tcpcb_t *tcb); // caller must hold tcb->lock - see definition
+void tcb_unlock(tcpcb_t *tcb); // use instead of release_mutex(&tcb->lock) everywhere
 void tcb_close(tcpcb_t *tcb, int error); // caller must hold tcb->lock
 
 void tcb_insert(tcpcb_t *tcb);
 void tcb_remove(tcpcb_t *tcb);
 tcpcb_t *tcb_lookup(uint32_t local_ip, uint32_t remote_ip, uint16_t local_port, uint16_t remote_port);
+tcpcb_t *tcb_lookup_locked(uint32_t local_ip, uint32_t remote_ip, uint16_t local_port, uint16_t remote_port); // returns locked
 
 struct listener {
     pool_node_t node;
@@ -115,15 +120,16 @@ listener_t *listener_create(uint16_t port); // NULL if already listening or pool
 void listener_close(listener_t *l);
 
 listener_t *listener_lookup(uint16_t port);
+listener_t *listener_lookup_locked(uint16_t port); // returns locked
 
 int tcp_listen(uint16_t port); // 0 on success, -1 if already listening or pool empty
 tcpcb_t *tcp_accept(listener_t *l); // blocks until a connection is ready
 
 uint16_t port_alloc(uint32_t local_ip, uint32_t remote_ip, uint16_t remote_port); // 0 on failure
 
-void tcp_send(tcpcb_t *tcb, const void *data, size_t len);
+int64_t tcp_send(tcpcb_t *tcb, const void *data, size_t len); // bytes queued, -1 on failure
 int64_t tcp_recv(tcpcb_t *tcb, void *buf, size_t n);
-void tcp_close(tcpcb_t *tcb);
+void tcp_close(tcpcb_t *tcb); // calling tcp_send or recv or anything like that after this is undefined behavior
 
 tcpcb_t *tcp_connect(net_device_t *dev, uint32_t dst_ip, uint16_t dst_port); // NULL on failure
 
