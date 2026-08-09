@@ -33,6 +33,7 @@ run: $(IMAGE_NAME).iso
 		-hdb data.hdd \
 		-netdev user,id=net0,hostfwd=tcp::5555-10.0.2.15:5555 \
 		-device e1000,netdev=net0 \
+		-object filter-dump,id=dump0,netdev=net0,file=capture.pcap \
 		-debugcon file:kernel.log \
 		-enable-kvm \
 		$(QEMUFLAGS)

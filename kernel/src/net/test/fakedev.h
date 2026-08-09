@@ -3,7 +3,7 @@
 #include "net/netdev.h"
 #include "net/block.h"
 
-#define FAKEDEV_OUTQ_SIZE 64
+#define FAKEDEV_OUTQ_SIZE 4096
 
 typedef struct fakedev {
     net_device_t dev;

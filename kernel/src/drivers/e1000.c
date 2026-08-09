@@ -145,10 +145,13 @@ static uint32_t tx_index; // next slot to hand a block to
 static block_t *tx_virt[TX_DESC_N];
 
 // q for the drainer to handle
-#define RXQ_N 128
+#define RXQ_N 8192
 static block_t *rxq[RXQ_N];
 static unsigned rxq_in, rxq_out; // add (irq) / read (drainer)
 static thread_control_block_t *drainer_tcb;
+
+static uint64_t rx_drops; // errored, rxq full, or pool empty
+static uint64_t tx_drops; // ring full (no free DD slot)
 
 static void e1000_drainer(void);
 
@@ -264,6 +267,7 @@ static int send_packet(net_device_t *dev, block_t *b) {
     lock_stuff();
 
     if (!(tx[tx_index].status & TXD_STAT_DD)) { // TODO eagerly free
+        tx_drops++;
         unlock_stuff();
         block_free(b);
         return -1;
@@ -343,6 +347,14 @@ net_device_t *e1000_netdev(void) {
     return &e1000_dev;
 }
 
+uint64_t e1000_rx_drops(void) {
+    return rx_drops;
+}
+
+uint64_t e1000_tx_drops(void) {
+    return tx_drops;
+}
+
 // pulls blocks off rxq and runs the protocol stack. a real task, so it can
 // take as long as it needs (arp resolution, etc) without the ring caring
 static void e1000_drainer(void) {
@@ -389,8 +401,13 @@ void irq_handler(void *ctx) {
                         pushed = true;
                     } else {
                         block_free(b); // rxq full, drop
+                        rx_drops++;
                     }
-                } // pool empty, drop
+                } else {
+                    rx_drops++; // pool empty, drop
+                }
+            } else {
+                rx_drops++; // frame errored, drop
             }
 
             rx[i].status = 0;

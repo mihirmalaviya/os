@@ -10,7 +10,8 @@
 
 #define BLOCK_SIZE 2048 // a bit big but fits in a page well
                         // TODO have a smaller alternative so an ACK doesnt take up 2kb
-#define BLOCK_NUM  32768 // 2^15
+
+#define BLOCK_NUM 524288 // 2^19
 
 typedef struct block {
     struct block *next;

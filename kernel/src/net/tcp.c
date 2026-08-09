@@ -6,6 +6,7 @@
 #include "lib/string.h"
 #include "net/byteorder.h"
 #include "arch/tsc.h"
+#include "arch/pit.h"
 #include "kernel.h"
 #include <stddef.h>
 
@@ -16,7 +17,7 @@
 #define IPV4_HDR_LEN 20
 #define TCP_HDR_LEN sizeof(tcp_header_t)
 
-#define TCP_DEFAULT_WINDOW 8192
+#define TCP_DEFAULT_WINDOW 8192*4
 
 typedef struct {
     uint32_t src_ip;
@@ -44,6 +45,12 @@ uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip, const void *segment, siz
 static tcpcb_t tcbs[NTCB];
 static pool_t tcb_pool;
 
+static uint64_t retransmit_count; // global, bumped once per actual retransmit - see t_rxt_fired
+
+uint64_t tcp_retransmit_count(void) {
+    return retransmit_count;
+}
+
 #define TCB_HASH_SIZE 16384 // 2^14
 
 static hnode_t *tcb_table[TCB_HASH_SIZE];
@@ -64,6 +71,8 @@ tcpcb_t *tcb_alloc(net_device_t *dev, uint32_t local_ip, uint32_t remote_ip, uin
 
     *tcb = (tcpcb_t){0};
     tcb->state = CLOSED;
+    tcb->refcount = 1; // when this hits 0 its freed
+
     qinit(&tcb->sndq, TCP_DEFAULT_WINDOW);
     qinit(&tcb->rcvq, TCP_DEFAULT_WINDOW);
     semaphore_init(&tcb->lock, 1);
@@ -83,6 +92,9 @@ tcpcb_t *tcb_alloc(net_device_t *dev, uint32_t local_ip, uint32_t remote_ip, uin
     tcb->snd_wnd = TCP_DEFAULT_WINDOW;
     tcb->mss = TCP_MTU-IPV4_HDR_LEN-TCP_HDR_LEN;
 
+    tcb->snd_cwnd = 10*tcb->mss; 
+    tcb->snd_ssthresh = UINT32_MAX; // no ceiling until we hit a retransmit
+
     return tcb;
 }
 
@@ -94,7 +106,8 @@ bool tcb_try_recycle(tcpcb_t *tcb) {
     ASSERT(tcb->lock.current_count>0, "tcb_try_recycle called without tcb lock held");
 
     lock_stuff();
-    bool recyclable = (tcb->refcount==0 && tcb->state==CLOSED);
+
+    bool recyclable = tcb->refcount==0;
     if (recyclable)
         tcb_free(tcb);
     unlock_stuff();
@@ -110,13 +123,35 @@ void tcb_unlock(tcpcb_t *tcb){
         release_mutex(&tcb->lock);
 }
 
+void tcb_ref_dec(tcpcb_t *tcb) {
+    ASSERT(tcb->lock.current_count>0, "tcb refcount touched without tcb lock held");
+    refcount_dec(&tcb->refcount);
+}
+
+static void tcb_timer_arm(tcpcb_t *tcb, timer_t *t, uint64_t delay_ms, void (*fired)(timer_t *t)) {
+    ASSERT(tcb->lock.current_count>0, "tcb_timer_arm called without tcb lock held");
+    if (t->state==TIMER_OFF)
+        refcount_inc(&tcb->refcount);
+    timer_arm(t, delay_ms, fired);
+}
+
+static void tcb_timer_cancel(tcpcb_t *tcb, timer_t *t) {
+    ASSERT(tcb->lock.current_count>0, "tcb_timer_cancel called without tcb lock held");
+    bool was_active = (t->state!=TIMER_OFF);
+    timer_cancel(t);
+    if (was_active)
+        tcb_ref_dec(tcb);
+}
+
 void tcb_close(tcpcb_t *tcb, int error) {
     ASSERT(tcb->lock.current_count>0, "tcb_close called without tcb lock held");
 
+    if (tcb->state==CLOSED) return; // incase called twice
+
     tcb_remove(tcb); // remove from hashmap
 
-    timer_cancel(&tcb->t_rxt_timer);
-    timer_cancel(&tcb->t_2msl_timer);
+    tcb_timer_cancel(tcb, &tcb->t_rxt_timer);
+    tcb_timer_cancel(tcb, &tcb->t_2msl_timer);
 
     qflush(&tcb->sndq);
     qflush(&tcb->rcvq);
@@ -126,8 +161,10 @@ void tcb_close(tcpcb_t *tcb, int error) {
     waitq_broadcast(&tcb->connecting);
     waitq_broadcast(&tcb->readers);
     waitq_broadcast(&tcb->writers);
+    epoll_notify(tcb);
 
     tcb->state = CLOSED;
+    tcb_ref_dec(tcb); // refcount can hit 0 now only
 }
 
 void tcb_insert(tcpcb_t *tcb) {
@@ -166,21 +203,24 @@ tcpcb_t *tcb_lookup_locked(uint32_t local_ip, uint32_t remote_ip, uint16_t local
     uint32_t key = tcb_hash_key(local_ip, remote_ip, local_port, remote_port);
 
     lock_stuff();
+    tcpcb_t *tcb = NULL;
     for (hnode_t *n = tcb_table[key]; n!=NULL; n=n->next) {
-        tcpcb_t *tcb=container_of(n, tcpcb_t, hnode);
-        if (tcb->local_ip==local_ip && tcb->remote_ip==remote_ip &&
-            tcb->local_port==local_port && tcb->remote_port==remote_port) {
-
+        tcpcb_t *found=container_of(n, tcpcb_t, hnode);
+        if (found->local_ip==local_ip && found->remote_ip==remote_ip &&
+            found->local_port==local_port && found->remote_port==remote_port) {
+            tcb = found;
             refcount_inc(&tcb->refcount);
-            acquire_mutex(&tcb->lock);
-            refcount_dec(&tcb->refcount);
-
-            unlock_stuff();
-            return tcb;
+            break;
         }
     }
     unlock_stuff();
-    return NULL;
+
+    if (tcb==NULL)
+        return NULL;
+
+    acquire_mutex(&tcb->lock);
+    tcb_ref_dec(tcb);
+    return tcb;
 }
 
 #define NLISTEN 64 // 2^6
@@ -202,23 +242,26 @@ listener_t *listener_create(uint16_t port) {
 
     *l = (listener_t){0};
     l->port = port;
+    l->refcount = 1; // decremented on close
+                   
     semaphore_init(&l->lock, 1);
 
     lock_stuff();
     hnode_insert(&listener_table[port%LISTENER_HASH_SIZE], &l->hnode); // add to hashmap
+    refcount_inc(&l->refcount);
+
     unlock_stuff();
 
     return l;
 }
 
 static void listener_try_free(listener_t *l) {
-    // caller must hold l->lock
     ASSERT(l->lock.current_count==1, "listener_try_free called without listener lock held");
 
     lock_stuff();
-    bool recyclable = (l->closing && l->refcount==0);
+    bool recyclable = (l->refcount==0);
+
     if (recyclable) {
-        // free while still holding
         pool_free(&listener_pool, l);
         unlock_stuff();
         return;
@@ -227,8 +270,18 @@ static void listener_try_free(listener_t *l) {
     release_mutex(&l->lock);
 }
 
+void listener_ref_dec(listener_t *l) {
+    ASSERT(l->lock.current_count>0, "listener refcount touched without listener lock held");
+    refcount_dec(&l->refcount);
+}
+
 void listener_close(listener_t *l) {
     acquire_mutex(&l->lock);
+
+    if (l->closing) { // already ran
+        listener_try_free(l);
+        return;
+    }
 
     l->closing = true;
     waitq_broadcast(&l->accept_waiters); // wakes so stuff doesnt wait forever
@@ -239,11 +292,11 @@ void listener_close(listener_t *l) {
     while (curr!=NULL){
         tcpcb_t *next = curr->accept_next;
 
-        refcount_inc(&curr->refcount);
+        refcount_inc(&curr->refcount); // pre-acquire, dont hold curr->lock yet
         acquire_mutex(&curr->lock);
-        refcount_dec(&curr->refcount);
+        tcb_ref_dec(curr);
 
-        refcount_dec(&curr->refcount); // released from the accept q
+        tcb_ref_dec(curr); // released from the accept q
 
         tcb_close(curr, TCP_EOF);
         tcb_unlock(curr);
@@ -257,8 +310,10 @@ void listener_close(listener_t *l) {
     lock_stuff();
     hnode_remove(&listener_table[l->port % LISTENER_HASH_SIZE], &l->hnode);
     unlock_stuff();
+    listener_ref_dec(l); // hashmap
 
-    listener_try_free(l); // releases the lock
+    listener_ref_dec(l); // can reach 0 now
+    listener_try_free(l); // releases lock
 }
 
 listener_t *listener_lookup(uint16_t port) {
@@ -275,24 +330,26 @@ listener_t *listener_lookup(uint16_t port) {
     return NULL;
 }
 
-// like listener_lookup, but hands back the listener locked
+// hands back the listener locked
 listener_t *listener_lookup_locked(uint16_t port) {
     lock_stuff();
+    listener_t *l = NULL;
     for (hnode_t *n = listener_table[port % LISTENER_HASH_SIZE]; n!=NULL; n=n->next) {
-        listener_t *l = container_of(n, listener_t, hnode);
-        if (l->port==port) {
-
+        listener_t *found = container_of(n, listener_t, hnode);
+        if (found->port==port) {
+            l = found;
             refcount_inc(&l->refcount);
-            acquire_mutex(&l->lock);
-            refcount_dec(&l->refcount);
-
-            unlock_stuff();
-            return l;
+            break;
         }
     }
     unlock_stuff();
 
-    return NULL;
+    if (l==NULL)
+        return NULL;
+
+    acquire_mutex(&l->lock);
+    listener_ref_dec(l);
+    return l;
 }
 
 int tcp_listen(uint16_t port) {
@@ -315,9 +372,8 @@ tcpcb_t *tcp_accept(listener_t *l) {
         l->nqueued--;
     }
 
-    refcount_dec(&l->refcount); // its no longer in the accept q
-
-    listener_try_free(l); // releases the lock
+    listener_ref_dec(l); // its no longer in the accept q
+    listener_try_free(l); // releases lock
     return tcb;
 }
 
@@ -378,13 +434,18 @@ int64_t tcp_send(tcpcb_t *tcb, const void *data, size_t len) {
     return written;
 }
 
-int64_t tcp_recv(tcpcb_t *tcb, void *buf, size_t n) {
+static int64_t tcp_recv_impl(tcpcb_t *tcb, void *buf, size_t n, bool block) {
     acquire_mutex(&tcb->lock);
+
+    if (!block && qlen(&tcb->rcvq)==0 && tcb->error==0){
+        tcb_unlock(tcb);
+        return -2;
+    }
 
     while (qlen(&tcb->rcvq)==0 && tcb->error==0){
         refcount_inc(&tcb->refcount);
         waitq_wait(&tcb->readers, &tcb->lock);
-        refcount_dec(&tcb->refcount);
+        tcb_ref_dec(tcb);
     }
 
     // if recieve is over, return EOF or error
@@ -392,7 +453,7 @@ int64_t tcp_recv(tcpcb_t *tcb, void *buf, size_t n) {
         tcb_unlock(tcb);
         if (tcb->error==TCP_EOF)
             return 0;
-        return -1;
+        return -tcb->error;
     }
 
     uint32_t taken = MIN((uint32_t)n, qlen(&tcb->rcvq));
@@ -400,16 +461,25 @@ int64_t tcp_recv(tcpcb_t *tcb, void *buf, size_t n) {
     qpeek(&tcb->rcvq, buf, taken);
     qdiscard(&tcb->rcvq, taken);
 
-    // receiver-side SWS avoidance ; dont do a window update until we have enough free space
-    if (taken>=2*tcb->mss)
-        tcp_output(tcb, FORCE);
+    tcp_output(tcb, 0);
 
     tcb_unlock(tcb);
     return taken;
 }
 
+int64_t tcp_recv(tcpcb_t *tcb, void *buf, size_t n) {
+    return tcp_recv_impl(tcb, buf, n, true);
+}
+
+// returns -2 instead of blocking when rcvq is empty and the connection is still open
+int64_t tcp_recv_nb(tcpcb_t *tcb, void *buf, size_t n) {
+    return tcp_recv_impl(tcb, buf, n, false);
+}
+
 void tcp_close(tcpcb_t *tcb) {
     acquire_mutex(&tcb->lock);
+
+    tcb->sock = NULL; // socket is going away regardless of how the tcb finishes closing
 
     switch (tcb->state) {
         case SYN_SENT:
@@ -436,8 +506,9 @@ void tcp_close(tcpcb_t *tcb) {
     qflush(&tcb->rcvq);
     waitq_broadcast(&tcb->readers);
     waitq_broadcast(&tcb->writers);
+    epoll_notify(tcb);
 
-    refcount_dec(&tcb->refcount); // was granted at accept
+    tcb_ref_dec(tcb); // was granted at accept
     tcb_unlock(tcb);
 }
 
@@ -451,7 +522,13 @@ static int backoff(int n){ // exponentially backoff
 static uint64_t rto(tcpcb_t *tcb) {
     ASSERT(tcb->lock.current_count>0, "rto called without tcb lock held");
 
-    int r=backoff(tcb->t_rxtcount)*RXT_MS;
+    // jacobson/karels - BSD: TCP_REXMTVAL(tp) = (t_srtt>>TCP_RTT_SHIFT) + t_rttvar
+    uint32_t base;
+    if (tcb->srtt==0)
+        base = RXT_MS;
+    else
+        base = (uint32_t)((tcb->srtt>>3) + tcb->rttvar);
+    int r = backoff(tcb->t_rxtcount) * (int)base;
     if (r<300) r=300; // clamp
     else if (r>64000) r=64000;
     return (uint64_t)r;
@@ -468,6 +545,7 @@ static void t_rxt_fired(timer_t *t) {
     }
 
     tcb->t_rxt_timer.state=TIMER_OFF;
+    tcb_ref_dec(tcb); // release the ref taken when this timer was armed
 
     tcb->t_rxtcount++;
     if (tcb->t_rxtcount>MAX_RETRIES){
@@ -477,6 +555,17 @@ static void t_rxt_fired(timer_t *t) {
     }
 
     tcb->snd_nxt = tcb->snd_una; // rewind
+    tcb->rtt_start = 0; // Karn
+    retransmit_count++;
+
+    // multiplicative decrease
+    uint32_t win = MIN(tcb->snd_wnd,tcb->snd_cwnd)/2;
+    if (win<2*tcb->mss) // clamp
+        win = 2*tcb->mss;
+    tcb->snd_ssthresh = win;
+    tcb->snd_cwnd = tcb->mss;
+
+
     tcp_output(tcb, 0); // rearms the timer itself
 
     tcb_unlock(tcb);
@@ -495,6 +584,7 @@ static void t_2msl_fired(timer_t *t) {
         return;
     }
     tcb->t_2msl_timer.state = TIMER_OFF;
+    tcb_ref_dec(tcb); // release the ref taken when this timer was armed
 
     if (tcb->state==FIN_WAIT_2)
         tcb_close(tcb, ETIMEDOUT); // peer never sent their FIN
@@ -506,6 +596,16 @@ static void t_2msl_fired(timer_t *t) {
 
 #define MAX_OUTPUT_SEGMENTS 100
 
+// calculate window size to advertise
+static uint32_t tcp_rcv_win(tcpcb_t *tcb){
+    uint32_t win = tcb->rcvq.limit - tcb->rcvq.len;
+    if (SEQ_LT(tcb->rcv_nxt+win, tcb->rcv_adv)) // clamp up; never move the advertised right edge backward
+        win = tcb->rcv_adv - tcb->rcv_nxt;
+    if (win>UINT16_MAX) // TODO window scaling
+        win=UINT16_MAX;
+    return win;
+}
+
 void tcp_output(tcpcb_t *tcb, int opts) {
     ASSERT(tcb->lock.current_count>0, "tcp_output called without tcb lock held");
 
@@ -513,6 +613,20 @@ void tcp_output(tcpcb_t *tcb, int opts) {
         return;
 
     bool force = opts & FORCE;
+
+    // window advertising
+    uint32_t rcv_win = tcp_rcv_win(tcb);
+    uint32_t wnd_right = tcb->rcv_nxt + rcv_win;
+
+    if (tcb->rcv_adv==tcb->rcv_nxt && rcv_win>0){ // was fully closed, now isnt
+        force=true;
+    }
+    if (SEQ_GT(wnd_right, tcb->rcv_adv)){
+        uint32_t growth = wnd_right - tcb->rcv_adv;
+        if (growth >= 2*tcb->mss) // SWS avoidance
+            force=true;
+    }
+
 
     for (int i=0; i<MAX_OUTPUT_SEGMENTS; i++) {
         uint8_t flags = ACK;
@@ -537,9 +651,10 @@ void tcp_output(tcpcb_t *tcb, int opts) {
         uint32_t inflight = tcb->snd_nxt-tcb->snd_una;
         uint32_t unsent = owed-inflight;
 
+        uint32_t snd_win = MIN(tcb->snd_wnd, tcb->snd_cwnd);
         uint32_t wnd_room=0;
-        if (inflight<tcb->snd_wnd) // avoids underflow
-            wnd_room = tcb->snd_wnd-inflight;
+        if (inflight<snd_win) // avoids underflow
+            wnd_room = snd_win-inflight;
         uint32_t len = MIN(MIN(wnd_room, unsent), tcb->mss);
 
         // only the first segment of a call can be forced
@@ -577,6 +692,16 @@ void tcp_output(tcpcb_t *tcb, int opts) {
 
         if (b==NULL) return;
 
+        // rtt sampling
+
+        bool retransmit = SEQ_LT(tcb->snd_nxt, tcb->snd_max);
+
+        // if we arent sampling anything lets start a sample
+        if (!retransmit && tcb->rtt_start==0) {
+            tcb->rtt_start = now_ms();
+            tcb->t_rtseq = tcb->snd_nxt;
+        }
+
         //build header
         tcp_header_t *out = (tcp_header_t *)block_push(b, sizeof(tcp_header_t));
         out->src_port = htons(tcb->local_port);
@@ -585,17 +710,22 @@ void tcp_output(tcpcb_t *tcb, int opts) {
         out->ack = htonl(tcb->rcv_nxt);
         out->data_offset = 5<<4;
         out->flags = flags;
-        out->window = htons(tcb->rcvq.limit - tcb->rcvq.len);
+        out->window = htons(rcv_win);
         out->urgent_ptr = 0;
         out->checksum = 0;
         out->checksum = tcp_checksum(tcb->local_ip, tcb->remote_ip, out, block_len(b));
+
+        tcb->rcv_adv = wnd_right;
+
+        if (data_len>0 && SEQ_GEQ(tcb->snd_nxt, tcb->snd_max)) // if we are writing new data only
+            tcb->bytes_sent += data_len;
 
         tcb->snd_nxt += len;
         tcb->snd_max = SEQ_MAX(tcb->snd_max, tcb->snd_nxt);
 
         // arm rxt if theres unacked data, and we havent already armed rxt
         if (tcb->snd_nxt!=tcb->snd_una && tcb->t_rxt_timer.state==TIMER_OFF)
-            timer_arm(&tcb->t_rxt_timer, rto(tcb), t_rxt_fired);
+            tcb_timer_arm(tcb, &tcb->t_rxt_timer, rto(tcb), t_rxt_fired);
 
         if (ipv4_send(tcb->dev, tcb->remote_ip, IPV4_PROTO_TCP, b)<0)
             break; // error, stop looping and just try next retransmit
@@ -780,6 +910,7 @@ void tcp_input(net_device_t *dev, block_t *b, uint32_t src_ip) {
                     tcb->synfin_cnt--; // our SYN just got acked
                     tcb->state = ESTABLISHED;
                     waitq_broadcast(&tcb->connecting); // wake a blocked connect()
+                    epoll_notify(tcb);
                     tcp_output(tcb, FORCE); // final ACK of the handshake
                 }
 
@@ -796,7 +927,7 @@ void tcp_input(net_device_t *dev, block_t *b, uint32_t src_ip) {
                 if (!(seg->flags & RST)){
                     // their fin retransmitted because our ack got dropped
                     if (tcb->state==TIME_WAIT)
-                        timer_arm(&tcb->t_2msl_timer, 2*MSL_MS, t_2msl_fired);
+                        tcb_timer_arm(tcb, &tcb->t_2msl_timer, 2*MSL_MS, t_2msl_fired);
                     tcp_output(tcb, FORCE);
                 }
                 goto unlock; // we drop out of order stuff for now
@@ -834,10 +965,10 @@ void tcp_input(net_device_t *dev, block_t *b, uint32_t src_ip) {
                     // add to the accept q
                     listener_t *l = listener_lookup_locked(tcb->local_port);
 
-                    // gone entirely, or found but already midclose 
+                    // gone entirely, or found but already midclose
                     if (l==NULL || l->closing){
                         if (l!=NULL)
-                            release_mutex(&l->lock);
+                            listener_try_free(l); // releases the lock
                         send_rst(tcb->dev, tcb->remote_ip, tcb->local_port, tcb->remote_port, seg, block_len(b)-hdr_len);
                         tcb_close(tcb, TCP_EOF);
                         goto unlock;
@@ -855,13 +986,13 @@ void tcp_input(net_device_t *dev, block_t *b, uint32_t src_ip) {
                         }
 
                         refcount_inc(&tcb->refcount); // tcb is in the accept q
-                                                      
+
                         l->nqueued++;
                         waitq_broadcast(&l->accept_waiters);
-                        release_mutex(&l->lock);
+                        listener_try_free(l); // releases the lock
                     }else{
                         // backlog full, RST and tear down
-                        release_mutex(&l->lock);
+                        listener_try_free(l); // releases the lock
                         send_rst(tcb->dev, tcb->remote_ip, tcb->local_port, tcb->remote_port, seg, block_len(b)-hdr_len);
                         tcb_close(tcb, TCP_EOF);
                         goto unlock;
@@ -892,12 +1023,46 @@ void tcp_input(net_device_t *dev, block_t *b, uint32_t src_ip) {
                     tcb->synfin_cnt--;
 
                 tcb->snd_una = seg_ack;
+                epoll_notify(tcb); // sndq just drained - writable-relevant, nothing else broadcasts this today
+
+                // jacobson/karels
+                // copied from bsd
+                if (tcb->rtt_start!=0 && SEQ_GT(seg_ack, tcb->t_rtseq)) {
+                    uint32_t rtt = (uint32_t)(now_ms()-tcb->rtt_start);
+                    tcb->rtt_start = 0;
+                    tcb->t_rxtcount = 0; // BSD: tcp_xmit_timer clears backoff only on a karn-validated
+                                         // sample, not on every partial ack - see t_rxt_fired below
+
+                    if (tcb->srtt!=0) {
+                        int32_t delta = (int32_t)rtt - (tcb->srtt>>3);
+                        tcb->srtt += delta;
+                        if (tcb->srtt<=0) tcb->srtt=1;
+
+                        if (delta<0) delta=-delta;
+                        delta -= (tcb->rttvar>>2);
+                        tcb->rttvar += delta;
+                        if (tcb->rttvar<=0) tcb->rttvar=1;
+                    } else {
+                        tcb->srtt = (int32_t)rtt<<3;
+                        tcb->rttvar = (int32_t)rtt<<1;
+                    }
+                }
+
+                // AIMD
+                // copied from bsd
+                uint32_t cw = tcb->snd_cwnd;
+                if (cw<=tcb->snd_ssthresh)
+                    tcb->snd_cwnd = cw + tcb->mss;
+                else
+                    tcb->snd_cwnd = cw + (tcb->mss*tcb->mss)/cw;
+
 
                 if (tcb->snd_una==tcb->snd_nxt){ // if theres nothing left to read
-                    timer_cancel(&tcb->t_rxt_timer); // unconditionally safe regardless of state
+                    tcb_timer_cancel(tcb, &tcb->t_rxt_timer); // unconditionally safe regardless of state
                 } else if (acked>0){
-                    tcb->t_rxtcount = 0; // they acked something we sent/retransmitted
-                    timer_arm(&tcb->t_rxt_timer, rto(tcb), t_rxt_fired); // restart on new data acked
+                    // restart with the current (possibly still backed-off) rto - BSD:
+                    // tcp_input.c:1028-1029, t_rxtcount itself is only cleared above
+                    tcb_timer_arm(tcb, &tcb->t_rxt_timer, rto(tcb), t_rxt_fired);
                 }
             }
 
@@ -905,12 +1070,12 @@ void tcp_input(net_device_t *dev, block_t *b, uint32_t src_ip) {
 
             if (tcb->state==FIN_WAIT_1 && our_fin_acked){
                 tcb->state = FIN_WAIT_2;
-                timer_arm(&tcb->t_2msl_timer, FIN_WAIT_2_TIMEOUT_MS, t_2msl_fired);
+                tcb_timer_arm(tcb, &tcb->t_2msl_timer, FIN_WAIT_2_TIMEOUT_MS, t_2msl_fired);
             }
 
             else if (tcb->state==CLOSING && our_fin_acked){
                 tcb->state = TIME_WAIT;
-                timer_arm(&tcb->t_2msl_timer, 2*MSL_MS, t_2msl_fired);
+                tcb_timer_arm(tcb, &tcb->t_2msl_timer, 2*MSL_MS, t_2msl_fired);
             }
 
             else if (tcb->state==LAST_ACK && our_fin_acked){
@@ -942,25 +1107,26 @@ void tcp_input(net_device_t *dev, block_t *b, uint32_t src_ip) {
                         // if our own FIN was also acked by this segment, this is simultaneous close
                         if (tcb->synfin_cnt==0){
                             tcb->state = TIME_WAIT;
-                            timer_arm(&tcb->t_2msl_timer, 2*MSL_MS, t_2msl_fired);
+                            tcb_timer_arm(tcb, &tcb->t_2msl_timer, 2*MSL_MS, t_2msl_fired);
                         }else{
                             tcb->state = CLOSING;
                         }
                         break;
                     case FIN_WAIT_2:
                         tcb->state = TIME_WAIT;
-                        timer_arm(&tcb->t_2msl_timer, 2*MSL_MS, t_2msl_fired);
+                        tcb_timer_arm(tcb, &tcb->t_2msl_timer, 2*MSL_MS, t_2msl_fired);
                         break;
                     default:
                         break;
                 }
             }
 
-            // force if we wrote anythign or FIN was consumed
             int out_opts=0;
-            if (written>0 || fin_consumed){
+            if ((accepts_data && payload_len>0) || fin_consumed) // we dont care if it was written we just care if we got something (could be a 0 window probe or such)
                 out_opts|=FORCE;
+            if (written>0 || fin_consumed) { // we got something
                 waitq_broadcast(&tcb->readers);
+                epoll_notify(tcb);
             }
 
             tcp_output(tcb, out_opts);

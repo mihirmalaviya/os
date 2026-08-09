@@ -79,6 +79,7 @@ block_t *qcopy(queue_t *q, uint32_t n, uint32_t offset) {
     // copy phase: skip only applies to the first block, then resets to 0
     uint32_t copied = 0;
     while (copied < n) {
+        ASSERT(b!=NULL, "qcopy ran off the end of the block chain - dlen/block mismatch");
         uint32_t take = MIN(block_len(b)-skip, n-copied);
         uint8_t *dst = block_put(out, take);
         memcpy(dst, b->data+skip, take);

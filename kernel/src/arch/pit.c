@@ -1,6 +1,7 @@
 #include "arch/pit.h"
 #include "arch/io.h"
 #include "arch/isr.h"
+#include "arch/tsc.h"
 #include "sched/task.h"
 
 #define PIT_CHANNEL0 0x40
@@ -31,7 +32,8 @@ uint64_t get_time_since_boot(void) {
 }
 
 uint64_t now_ms(void) {
-    return timer_ticks;
+    // return timer_ticks;
+    return tsc_ms();
 }
 
 void sleep_ticks(uint64_t ticks) {

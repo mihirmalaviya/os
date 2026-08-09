@@ -7,6 +7,7 @@
 #include "arch/idt.h"
 #include "arch/pic.h"
 #include "arch/pit.h"
+#include "arch/tsc.h"
 #include "arch/irq.h"
 #include "mm/pmm.h"
 #include "mm/vmm.h"
@@ -26,6 +27,8 @@
 #include "net/eth.h"
 #include "net/timer.h"
 #include "net/tcp.h"
+#include "net/http.h"
+#include "net/test/stress_test.h"
 #include "lib/string.h"
 
 char *fb;
@@ -67,22 +70,22 @@ void task_b_fn(void) {
 //     }
 // }
 
-// void curl_task(void) {
-//     unlock_scheduler();
-//
-//     char buf[2048];
-//     // example.com = 172.66.147.243
-//     int n = http_get(0xAC4293F3, 80, "example.com", "/", buf, sizeof buf - 1);
-//     if (n<0) {
-//         kprintf("curl: failed\n");
-//         return;
-//     }
-//     buf[n] = '\0';
-//     kprintf("curl got %d bytes:\n%s\n", n, buf);
-//     for (;;){
-//         asm ("hlt");
-//     }
-// }
+void curl_task(void) {
+    unlock_scheduler();
+
+    char buf[2048];
+    // example.com = 172.66.147.243
+    int n = http_get(0xAC4293F3, 80, "example.com", "/", buf, sizeof buf - 1);
+    if (n<0) {
+        kprintf("curl: failed\n");
+        return;
+    }
+    buf[n] = '\0';
+    kprintf("curl got %d bytes:\n%s\n", n, buf);
+    for (;;){
+        asm ("hlt");
+    }
+}
 
 // Set the base revision to 6, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
@@ -140,13 +143,14 @@ void kmain(void) {
     idt_init();
     pic_init();
     pit_init();
+    tsc_calibrate();
     keyboard_init();
     pmm_init();
     vmm_init();
     heap_init();
-    terminal_init();   // allocate the terminal line ring buffer (needs the heap)
+    terminal_init(); // allocate the terminal line ring buffer (needs the heap)
     vfs_init();
-    block_init();      // network buffer pool, needs the pmm for its dma pages
+    block_init(); // network buffer pool, needs the pmm for its dma pages
 
     kprintf("hello kernel world!\n");
 
@@ -158,10 +162,12 @@ void kmain(void) {
     tcp_init();
 
     sched_init();
-    task_create(task_b_fn);
+    // task_create(task_b_fn);
 
     // task_create(tcp_recv_task);
     // task_create(curl_task);
+    task_create(stress_http);
+    task_create(stress_echo);
 
     sti();
 

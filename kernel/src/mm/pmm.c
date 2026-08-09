@@ -87,29 +87,42 @@ void pmm_init(void) {
     // kprintf("%x\n",bitmap);
 }
 
-// need to optimize this; or change to using a buddy allocator or sm
+static uint64_t alloc_cursor; // TODO do something better
+
 uint64_t pmm_alloc(void) {
-    for (size_t i=0; i<pmm_total_pages; i++){
+    for (size_t i=alloc_cursor; i<pmm_total_pages; i++){
         if (bitmap_get(i)==0){
             bitmap_set(i);
-            uint64_t phys = i * PAGE_SIZE;
-            memset((uint8_t *)(phys + pmm_hhdm_offset), 0, PAGE_SIZE);
+            alloc_cursor = i+1;
+            uint64_t phys = i*PAGE_SIZE;
+            memset((uint8_t *)(phys+pmm_hhdm_offset), 0, PAGE_SIZE);
+            return phys;
+        }
+    }
+    for (size_t i=0; i<alloc_cursor; i++){
+        if (bitmap_get(i)==0){
+            bitmap_set(i);
+            alloc_cursor = i+1;
+            uint64_t phys = i*PAGE_SIZE;
+            memset((uint8_t *)(phys+pmm_hhdm_offset), 0, PAGE_SIZE);
             return phys;
         }
     }
     return 0;
 }
 
-uint64_t pmm_alloc_contig(size_t n){
-    int run=0;
-    for (size_t i=0; i<pmm_total_pages; i++){
+static uint64_t alloc_contig_from(size_t start, size_t end, size_t n) {
+    size_t run=0;
+    for (size_t i=start; i<end; i++){
         if (bitmap_get(i)==0) {
             run++;
             if (run==n){
-                for (size_t j=i-n+1; j<=i; j++)
+                size_t base=i-n+1;
+                for (size_t j=base; j<=i; j++)
                     bitmap_set(j);
-                uint64_t phys = (i-n+1) * PAGE_SIZE;
-                memset((uint8_t *)(phys + pmm_hhdm_offset), 0, PAGE_SIZE*n);
+                alloc_cursor = i+1;
+                uint64_t phys = base*PAGE_SIZE;
+                memset((uint8_t *)(phys+pmm_hhdm_offset), 0, PAGE_SIZE*n);
                 return phys;
             }
         } else {
@@ -119,6 +132,12 @@ uint64_t pmm_alloc_contig(size_t n){
     return 0;
 }
 
+uint64_t pmm_alloc_contig(size_t n){
+    uint64_t phys = alloc_contig_from(alloc_cursor, pmm_total_pages, n);
+    if (phys) return phys;
+    return alloc_contig_from(0, alloc_cursor, n);
+}
+
 void pmm_free(uint64_t phys) {
-    bitmap_clear(phys / PAGE_SIZE);
+    bitmap_clear(phys/PAGE_SIZE);
 }

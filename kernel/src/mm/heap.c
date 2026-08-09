@@ -5,7 +5,7 @@
 
 #define PAGE_SIZE  4096ULL
 #define HEAP_START 0x444444440000ULL
-#define HEAP_SIZE  (4ULL * 1024 * 1024)
+#define HEAP_SIZE  (64ULL * 1024 * 1024)
 
 static uint64_t heap_cursor = HEAP_START;
 static uint64_t heap_mapped_until = HEAP_START;

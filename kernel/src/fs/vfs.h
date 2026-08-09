@@ -45,7 +45,7 @@ int vfs_mount(char *device, char *target, char *fs_type);
 int vfs_umount(char *device, char *target);
 mountpoint_t *get_mountpoint(const char *path);
 
-#define VFS_MAX_OPEN_FILES 64
+#define VFS_MAX_OPEN_FILES 15000
 
 // a VFS-level handle to an open file: which mountpoint owns it, and the
 // driver's own fs_specific id for it (from fs_operations_t.open)

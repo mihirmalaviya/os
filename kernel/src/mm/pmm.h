@@ -5,7 +5,7 @@
 extern uint64_t pmm_hhdm_offset;
 
 void     pmm_init(void);
-uint64_t pmm_alloc(void);   // returns physical address, 0 if OOM
+uint64_t pmm_alloc(void); // returns physical address, 0 if OOM
 uint64_t pmm_alloc_contig(size_t n);
 void     pmm_free(uint64_t phys);
 
