@@ -75,6 +75,7 @@ typedef struct tcpcb {
     uint32_t iss;
     uint32_t snd_una, snd_nxt, snd_max, snd_wnd;
     uint64_t bytes_sent; // total non retransmitted bytes sent
+    uint64_t bytes_received; // total payload bytes delivered to rcvq
     uint32_t t_rtseq;    // snd_nxt of the segment currently being timed
     uint64_t rtt_start;  // 0 = not timing anything
     int32_t  srtt, rttvar;

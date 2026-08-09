@@ -1091,6 +1091,7 @@ void tcp_input(net_device_t *dev, block_t *b, uint32_t src_ip) {
                 block_pull(b, hdr_len);
                 written = qwrite(&tcb->rcvq, b->data, payload_len);
                 tcb->rcv_nxt += written; // ack what we wrote
+                tcb->bytes_received += written;
             }
 
             // only consume the FIN once evertyhing is taken

@@ -16,9 +16,9 @@
 #define IP4(a,b,c,d) (((uint32_t)(a)<<24)|((uint32_t)(b)<<16)|((uint32_t)(c)<<8)|(uint32_t)(d))
 #define MIN(a,b) ((a)<(b)?(a):(b))
 
-#define TARGET_IP IP4(34,200,45,130) // httpbin.org
+#define TARGET_IP IP4(90,130,70,73) // speedtest.tele2.net
 #define TARGET_PORT 80
-#define TARGET_BYTES 1000000 // 1mb
+#define TARGET_BYTES 1048576 // 1mb
 
 #define NCONN 500 // conns per test
 
@@ -42,10 +42,8 @@ void stress_http(void) {
             continue;
         }
 
-        char path[64];
-        npf_snprintf(path, sizeof path, "/bytes/%d", TARGET_BYTES);
         char req[128];
-        int n = http_build_get(req, sizeof req, "httpbin.org", path);
+        int n = http_build_get(req, sizeof req, "speedtest.tele2.net", "/1MB.zip");
         write(fd, req, n);
 
         tcpcb_t *tcb = sock_tcb(fd);
@@ -68,8 +66,7 @@ void stress_http(void) {
             continue;
         // if we are here it must be end of connection
 
-        uint32_t got = tcb->rcv_nxt - tcb->irs - 2; // -SYN -FIN
-        if (r==0 && got>0)
+        if (r==0 && tcb->bytes_received>=TARGET_BYTES)
             ok++;
 
         done++;
@@ -77,7 +74,7 @@ void stress_http(void) {
                done, started, ok, (unsigned long long)tcp_retransmit_count());
 
         if (done%100==0)
-            kprintf("%d done for http test, retransmits=%llu\n", done, (unsigned long long)tcp_retransmit_count());
+            kprintf("%d done for http test, ok=%d retransmits=%llu\n", done, ok, (unsigned long long)tcp_retransmit_count());
 
         epoll_remove(&ep, tcb);
         tcp_close(tcb);
