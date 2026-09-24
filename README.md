@@ -1,34 +1,57 @@
-## How to use this?
+# mihir's os
 
-### Dependencies
+A small x86-64 kernel written from scratch in C and assembly, with its own TCP/IP stack and a driver for the Intel e1000 network card. It boots with Limine and runs in QEMU.
 
-Any `make` command depends on GNU make (`gmake`) and is expected to be run using it. This usually means using `make` on most GNU/Linux distros, or `gmake` on other non-GNU systems.
+## Quickstart
 
-All `make all*` targets depend on a GNU-compatible C toolchain capable of generating x86-64 ELF objects. Usually `gcc/binutils` or `clang/llvm/lld` provided by any x86-64 UNIX like (including Linux) distribution will suffice.
+Needs: GNU make, gcc or clang, nasm, xorriso, qemu
 
-Additionally, building an ISO with `make all` requires `xorriso`, and building a HDD/USB image with `make all-hdd` requires `sgdisk` (usually from `gdisk` or `gptfdisk` packages) and `mtools`.
-
-### Toolchain selection
-
-The `TOOLCHAIN` and `TOOLCHAIN_PREFIX` `make` variables can be used to set the toolchain. `TOOLCHAIN` can be set to `llvm` to use Clang/LLVM.
-
-For example:
-```
-make TOOLCHAIN=llvm
-```
-or:
-```
-make TOOLCHAIN_PREFIX=x86_64-elf-
+```sh
+git clone https://github.com/mihirmalaviya/os && cd os
+./kernel/get-deps
+make run
 ```
 
-### Makefile targets
+`kernel.log` gets the debug output, and `capture.pcap` gets every packet
 
-Running `make all` will compile the kernel (from the `kernel/` directory) and then generate a bootable ISO image.
+## what's in it
 
-Running `make all-hdd` will compile the kernel and then generate a raw image suitable to be flashed onto a USB stick or hard drive/SSD.
+**Boot and CPU**
+- Limine boot, GDT, IDT, ISRs, 8259 PIC
+- PIT timer, TSC calibration for timing in nanoseconds
 
-Running `make run` will build the kernel and a bootable ISO (equivalent to make all) and then run it using `qemu` (if installed).
+**Memory**
+- Bitmap physical page allocator, including contiguous allocations for DMA
+- 4-level paging: map, unmap, and MMIO mappings
+- Kernel heap (a bump allocator for now)
 
-Running `make run-hdd` will build the kernel and a raw HDD image (equivalent to make all-hdd) and then run it using `qemu` (if installed).
+**Scheduling**
+- Preemptive multitasking with 50 ms time slices and two priority levels
+- Sleep, blocking and unblocking, semaphores, mutexes, wait queues
+- Idle task, and a cleaner task that reaps finished threads
 
-The `run-uefi` and `run-hdd-uefi` targets are equivalent to their non `-uefi` counterparts except that they boot `qemu` using a UEFI-compatible firmware.
+**Drivers**
+- PCI enumeration
+- Intel e1000 NIC: MMIO setup, DMA descriptor rings (64 RX, 256 TX), interrupt-driven RX/TX
+- ATA disk (PIO), PS/2 keyboard, framebuffer terminal with PSF fonts
+
+**Networking**
+- Ethernet, ARP with a cache, IPv4, UDP
+- TCP:
+  - the full connection state machine
+  - retransmission with Jacobson/Karels RTO and exponential backoff
+  - slow start and congestion avoidance
+  - MSS option, silly-window-syndrome avoidance, Nagle-style coalescing
+  - TIME_WAIT
+- Randomized ISNs and ephemeral ports, a keyed connection hash, and a bounded accept backlog
+- Hashed timer wheel (8192 × 1 ms slots) driving every TCP timer
+- BSD-style sockets (`socket`, `bind`, `listen`, `accept`, `connect`, non-blocking connect) and an epoll-style readiness API
+- A tiny HTTP GET client
+- Zero-copy packet buffers with headroom, like Linux `sk_buff`s
+
+**Filesystems**
+- VFS with mount points, a tar filesystem as root, and `/proc`
+- FAT and echfs readers (not wired in yet)
+
+**Shell**
+- `ls`, `cat`, `tasks`, `lspci`, `clear`
